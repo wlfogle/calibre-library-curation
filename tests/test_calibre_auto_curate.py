@@ -55,6 +55,29 @@ class AutoCurationTests(unittest.TestCase):
         self.assertNotIn("series;", rows[0]["update_fields"])
         self.assertNotIn("#series3", rows[0]["update_fields"])
 
+    def test_default_engine_build_uses_vendored_core_and_selected_cache(self):
+        target=self.root/"isolated-build-cache"
+        def build(command,**kwargs):
+            self.assertIn("--locked",command)
+            self.assertIn("--offline",command)
+            self.assertEqual(kwargs["env"]["CARGO_TARGET_DIR"],str(target))
+            engine=target/"debug/nexus-calibre-research"
+            engine.parent.mkdir(parents=True)
+            engine.write_text("fixture")
+            engine.chmod(0o700)
+        self.assertTrue((m.CORE/"Cargo.toml").is_file())
+        self.assertTrue(m.CORE.is_relative_to(m.REPO))
+        with patch.dict(os.environ,{"CARGO_TARGET_DIR":str(target)}), \
+                patch.object(m.subprocess,"run",side_effect=build):
+            self.assertEqual(m.ensure_engine(),target/"debug/nexus-calibre-research")
+
+    def test_engine_build_cache_cannot_write_inside_a_calibre_library(self):
+        with patch.dict(os.environ,{"CARGO_TARGET_DIR":str(self.library/"build")}), \
+                patch.object(m.subprocess,"run") as build:
+            with self.assertRaisesRegex(m.Refusal,"Build cache"):
+                m.ensure_engine()
+            build.assert_not_called()
+
     def test_export_binding_and_evidence_required(self):
         for modify in (
             lambda e: e.update(job_id="other"),
@@ -292,11 +315,100 @@ class AutoCurationTests(unittest.TestCase):
             summary=json.loads(output.getvalue())
             self.assertEqual(code,0)
             self.assertFalse(summary["applied"])
+            self.assertEqual(summary["apply_status"],"no_changes")
             self.assertIn("No metadata changes",summary["apply_note"])
             self.assertTrue(Path(summary["mapping_csv_path"]).is_file())
             self.assertTrue(Path(summary["dry_run_report_path"]).is_file())
             self.assertEqual(summary["job_sequence"],1)
             self.assertEqual(process.call_count,1)
+
+    def test_apply_status_covers_each_audit_and_native_outcome(self):
+        scenarios = [
+            (False,True,False,True,None,"dry_run_only"),
+            (False,True,True,True,None,"dry_run_only"),
+            (True,True,False,True,None,"applied"),
+            (True,True,True,True,None,"blocked_by_errors"),
+            (True,True,False,False,None,"no_changes"),
+            (False,False,False,False,None,"dry_run_only"),
+            (True,False,False,False,None,"no_verified_mapping"),
+            (True,True,False,True,"native","failed"),
+            (True,True,False,True,"guard","failed"),
+        ]
+        for n,(apply,has_rows,errors,changes,failure,expected) in enumerate(scenarios):
+            with self.subTest(status=expected,failure=failure,apply=apply):
+                workspace=self.root/f"scenario-{n}"
+                def invoke(command,**kwargs):
+                    if command[0]=="calibre-debug":
+                        if failure=="native":
+                            raise m.subprocess.CalledProcessError(2,command)
+                        return
+                    request=json.loads(Path(command[1]).read_text())
+                    export=copy.deepcopy(self.export)
+                    export.update(job_id=request["job_id"],statuses={},exceptions=[],retries=[])
+                    if not has_rows:
+                        export["mappings"]=[]
+                    path=workspace/"engine/exports"/f"{request['job_id']}.json"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(json.dumps(export))
+                def guard(*args):
+                    if failure=="guard":
+                        raise m.Refusal("Fixture reserve refusal")
+                audit={"errors":["Fixture validation conflict"] if errors else [],
+                       "changes":[{"id":1}] if changes else [],"approval":"fixture-approval"}
+                with patch.object(m,"read_csv",return_value=({},[])), \
+                        patch.object(m,"snapshot",return_value={"books":{}}), \
+                        patch.object(m,"protected_ids",return_value=set()), \
+                        patch.object(m,"ensure_engine",return_value=Path("/fixture-engine")), \
+                        patch.object(m,"storage_preflight"), \
+                        patch.object(m,"storage_guard",side_effect=guard), \
+                        patch.object(m,"build_report",return_value=audit), \
+                        patch.object(m.subprocess,"run",side_effect=invoke) as process:
+                    flags=["--library",str(self.library),"--clone-receipt",str(self.receipt),
+                           "--workspace",str(workspace),"--export-only"]
+                    if apply:
+                        flags.append("--apply")
+                    with redirect_stdout(io.StringIO()),redirect_stderr(io.StringIO()):
+                        code=m.main(flags)
+                summary=m.inspect_summary(workspace,self.library)
+                self.assertEqual(summary["apply_status"],expected)
+                self.assertIn(summary["apply_status"],{s.value for s in m.ApplyStatus})
+                self.assertEqual(summary["applied"],expected=="applied")
+                self.assertEqual(code,2 if errors or failure else 0)
+                self.assertEqual(process.call_count,2 if expected=="applied" or failure=="native" else 1)
+                if failure:
+                    self.assertIn("apply_error",summary)
+                    self.assertEqual(summary["apply_attempted"],failure=="native")
+        self.assertEqual((self.library/"metadata.db").read_bytes(),b"fixture")
+
+    def test_empty_retry_selection_has_explicit_status_and_does_not_start_engine(self):
+        workspace=self.root/"empty-retry"
+        with patch.object(m,"read_csv",return_value=({},[])), \
+                patch.object(m,"snapshot",return_value={"books":{}}), \
+                patch.object(m,"protected_ids",return_value=set()), \
+                patch.object(m,"ensure_engine") as engine:
+            output=io.StringIO()
+            with redirect_stdout(output):
+                code=m.main(["--library",str(self.library),"--clone-receipt",str(self.receipt),
+                             "--workspace",str(workspace),"--retry-exceptions"])
+        self.assertEqual(code,0)
+        summary=json.loads(output.getvalue())
+        self.assertEqual(summary["apply_status"],"skipped_no_selection")
+        self.assertFalse(summary["applied"])
+        engine.assert_not_called()
+
+    def test_summary_rejects_unknown_apply_status_but_keeps_legacy_summaries_readable(self):
+        workspace=self.root/"status-inspection"
+        jobs=workspace/"jobs"
+        jobs.mkdir(parents=True)
+        job,sequence=m.create_job(jobs,"3"*32,self.library)
+        summary={"job_id":job.name,"job_sequence":sequence,"library":str(self.library),"applied":False}
+        path=job/"summary.json"
+        path.write_text(json.dumps(summary))
+        self.assertEqual(m.inspect_summary(workspace,self.library)["job_id"],job.name)
+        summary["apply_status"]="invented-status"
+        path.write_text(json.dumps(summary))
+        with self.assertRaisesRegex(m.Refusal,"apply_status"):
+            m.inspect_summary(workspace,self.library)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@
 import argparse
 from contextlib import contextmanager
 import csv
+from enum import Enum
 import fcntl
 import hashlib
 import json
@@ -25,11 +26,20 @@ from calibre_chronology import (
 )
 
 REPO = Path(__file__).resolve().parents[1]
-CURATOR = REPO.parent / "calibre-curator"
+CORE = REPO / "vendor/curator-core"
 LIVE_LIBRARY = Path("/media/loufogle/Data/Calibre Library")
 TEST_LIBRARY = Path("/media/loufogle/Data/Calibre Test Workspace-20261119/Calibre Library")
 BASELINE = Path("/home/loufogle/Downloads/all books.csv")
 MANIFEST = REPO / "tools/calibre-research/Cargo.toml"
+
+class ApplyStatus(str, Enum):
+    DRY_RUN_ONLY = "dry_run_only"
+    APPLIED = "applied"
+    BLOCKED_BY_ERRORS = "blocked_by_errors"
+    NO_CHANGES = "no_changes"
+    NO_VERIFIED_MAPPING = "no_verified_mapping"
+    SKIPPED_NO_SELECTION = "skipped_no_selection"
+    FAILED = "failed"
 
 
 def validate_clone(library, receipt):
@@ -159,14 +169,17 @@ def ensure_engine(override=None):
     if override:
         engine = Path(override).resolve(strict=True)
     else:
-        if not CURATOR.joinpath("crates/curator-core/Cargo.toml").is_file():
-            raise Refusal(f"Adjacent Calibre Curator engine is required: {CURATOR}")
-        env = dict(os.environ, CARGO_TARGET_DIR=str(CURATOR / "target"))
+        if not (CORE / "Cargo.toml").is_file():
+            raise Refusal(f"Vendored research core is missing: {CORE}")
+        target = Path(os.environ.get("CARGO_TARGET_DIR") or REPO / "target").expanduser().resolve()
+        if any((p/"metadata.db").is_file() for p in (target,*target.parents)):
+            raise Refusal("Build cache must be outside every Calibre library")
+        env = dict(os.environ, CARGO_TARGET_DIR=str(target))
         subprocess.run(
-            ["cargo", "build", "--offline", "--manifest-path", str(MANIFEST)],
+            ["cargo", "build", "--locked", "--offline", "--manifest-path", str(MANIFEST)],
             env=env, check=True,
         )
-        engine = CURATOR / "target/debug/nexus-calibre-research"
+        engine = target / "debug/nexus-calibre-research"
     if not engine.is_file() or not os.access(engine, os.X_OK):
         raise Refusal("Rust research adapter is not executable")
     return engine
@@ -291,6 +304,11 @@ def inspect_summary(workspace, library, job_id=None):
             or metadata and (metadata.get("library") != str(library)
                              or summary.get("job_sequence") != metadata["sequence"])):
         raise Refusal("Summary identity, library or sequence is invalid")
+    if "apply_status" in summary:
+        try:
+            ApplyStatus(summary["apply_status"])
+        except (ValueError, TypeError) as exc:
+            raise Refusal("Summary has an invalid apply_status") from exc
     return summary
 
 
@@ -389,8 +407,13 @@ def run(args):
             exceptions = list_exceptions(workspace, selected, args.query, args.exception_status)
             selected = [item["id"] for item in exceptions]
             if not selected:
-                print("No matching exceptions to retry.")
-                return {"validation_errors": [], "exceptions": 0, "applied": False}
+                summary = {
+                    "validation_errors": [], "exceptions": 0, "applied": False,
+                    "apply_status": ApplyStatus.SKIPPED_NO_SELECTION,
+                    "apply_note": "No matching factual exceptions to retry; no engine or apply started",
+                }
+                print(json.dumps(summary, indent=2))
+                return summary
             args.refresh = True
         if len(set(selected)) != len(selected) or any(i not in current for i in selected):
             raise Refusal("Choose unique existing book IDs")
@@ -429,6 +452,7 @@ def run(args):
             "library_books": len(current), "validated_mapping_rows": len(rows),
             "research_statuses": export["statuses"], "protected_books": len(protected),
             "exceptions": len(export["exceptions"]), "applied": False,
+            "apply_status": ApplyStatus.DRY_RUN_ONLY,
             "automatic_retries": len(export.get("retries", [])),
             "full_library_verified": False,
             "mapping_csv_path": str(mapping_path),
@@ -441,26 +465,42 @@ def run(args):
             summary["validation_errors"] = audit["errors"]
             summary["proposed_changes"] = len(audit["changes"])
             if args.apply and not audit["errors"] and audit["changes"]:
-                validate_clone(library, receipt)
-                storage_guard(library)
-                config = workspace / "calibre-runtime-config"
-                config.mkdir(mode=0o700, exist_ok=True)
-                subprocess.run([
-                    "calibre-debug", "-e", str(REPO / "scripts/calibre_chronology.py"), "--",
-                    "--library", str(library), "--csv", str(mapping_path),
-                    "--baseline", str(args.baseline), "--report", str(job / "apply.json"),
-                    "--apply", "--approve", audit["approval"],
-                    "--backup-dir", str(workspace / "metadata-backups"),
-                ], env=dict(os.environ, CALIBRE_CONFIG_DIRECTORY=str(config)), check=True)
+                summary["apply_attempted"] = False
+                try:
+                    validate_clone(library, receipt)
+                    storage_guard(library)
+                    config = workspace / "calibre-runtime-config"
+                    config.mkdir(mode=0o700, exist_ok=True)
+                    summary["apply_attempted"] = True
+                    subprocess.run([
+                        "calibre-debug", "-e", str(REPO / "scripts/calibre_chronology.py"), "--",
+                        "--library", str(library), "--csv", str(mapping_path),
+                        "--baseline", str(args.baseline), "--report", str(job / "apply.json"),
+                        "--apply", "--approve", audit["approval"],
+                        "--backup-dir", str(workspace / "metadata-backups"),
+                    ], env=dict(os.environ, CALIBRE_CONFIG_DIRECTORY=str(config)), check=True)
+                except (Refusal, OSError, ValueError, subprocess.SubprocessError) as exc:
+                    summary["apply_status"] = ApplyStatus.FAILED
+                    summary["apply_error"] = str(exc)
+                    summary["apply_blocked"] = (
+                        "Apply did not complete; inspect the apply report and recovery journal before retrying"
+                    )
+                    private_json(job / "summary.json", summary)
+                    raise
                 summary["applied"] = True
+                summary["apply_status"] = ApplyStatus.APPLIED
             elif args.apply and audit["errors"]:
+                summary["apply_status"] = ApplyStatus.BLOCKED_BY_ERRORS
                 summary["apply_blocked"] = "Resolve reported conflicts; no metadata written"
             elif args.apply and not audit["changes"]:
+                summary["apply_status"] = ApplyStatus.NO_CHANGES
                 summary["apply_note"] = "No metadata changes proposed; already matches verified assignments"
         else:
             summary["validation_errors"] = []
             summary["proposed_changes"] = 0
             summary["apply_blocked"] = "No source-validated mapping available"
+            if args.apply:
+                summary["apply_status"] = ApplyStatus.NO_VERIFIED_MAPPING
         private_json(job / "summary.json", summary)
         print(json.dumps(summary, indent=2))
         return summary

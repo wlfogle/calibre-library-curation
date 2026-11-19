@@ -77,6 +77,92 @@ pub struct Document {
     pub chunks: Vec<Chunk>,
 }
 
+pub fn pending_chunk_indices(document: &Document, book: &Book) -> Result<Vec<usize>> {
+    let inputs = facts::chunks(&document.page);
+    let completed = document
+        .chunks
+        .iter()
+        .map(|c| c.segments_hash.clone())
+        .collect::<BTreeSet<_>>();
+    let temporal = regex::Regex::new(r"(?i)\b\d+\s*(?:DR|AD|CE|AC|PC)\b|\b\d{1,3}\.M\d+\b")?;
+    let title = book.title.to_lowercase();
+    let author = book
+        .authors
+        .first()
+        .map(|a| normalize(a))
+        .unwrap_or_default();
+    let mut pending = Vec::new();
+    for (index, input) in inputs.iter().enumerate() {
+        if completed.contains(&sources::hash(&serde_json::to_vec(input)?)) {
+            continue;
+        }
+        let body = input
+            .iter()
+            .filter(|s| s.kind != "title" && !s.kind.starts_with('h'))
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let score = (
+            !title.is_empty() && body.to_lowercase().contains(&title),
+            temporal.is_match(&body),
+            !author.is_empty() && normalize(&body).contains(&author),
+        );
+        pending.push((index, score));
+    }
+    pending.sort_by_key(|(index, score)| (std::cmp::Reverse(*score), *index));
+    Ok(pending.into_iter().map(|(index, _)| index).collect())
+}
+
+pub fn align_chunk_plans(store: &Store, corpus: &mut Corpus) -> Result<()> {
+    let mut reset = Vec::new();
+    for (url, document) in &mut corpus.pages {
+        for chunk in &document.chunks {
+            if chunk.segments_hash
+                != sources::hash(&serde_json::to_vec(&chunk.evidence.source.segments)?)
+                || chunk.evidence.source.sha256 != document.page.source.sha256
+                || chunk.evidence.source.location != document.page.source.location
+                || chunk.evidence.source.segments.iter().any(|s| {
+                    !document
+                        .page
+                        .source
+                        .segments
+                        .iter()
+                        .any(|p| p.ordinal == s.ordinal && p.text == s.text)
+                })
+            {
+                bail!("Changed source snapshot cannot be repaired as a chunk-plan migration");
+            }
+            if chunk.extraction_version == facts::VERSION {
+                facts::validate(chunk)?;
+            }
+        }
+        let inputs = facts::chunks(&document.page)
+            .iter()
+            .map(|input| serde_json::to_vec(input).map(|raw| sources::hash(&raw)))
+            .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+        if document
+            .chunks
+            .iter()
+            .any(|c| !inputs.contains(&c.segments_hash) || c.extraction_version != facts::VERSION)
+        {
+            let archived = serde_json::to_vec(document)?;
+            store.cache_value(
+                &format!("archived-source-plan:{}", sources::hash(&archived)),
+                document,
+            )?;
+            document.chunks.clear();
+            document.processed = 0;
+            reset.push(url.clone());
+        }
+    }
+    for investigation in corpus.investigations.values_mut() {
+        for url in &reset {
+            investigation.completed_urls.remove(url);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Proof {
     pub url: String,
@@ -100,6 +186,25 @@ pub struct Run {
     pub model: String,
     pub digest: String,
     pub version: String,
+}
+
+pub fn preserve_research_context(previous: &Run, mut recalculated: Run) -> Run {
+    recalculated.queries = previous.queries.clone();
+    recalculated.model = previous.model.clone();
+    recalculated.digest = previous.digest.clone();
+    if recalculated.status == "research_pending" {
+        for note in &previous.notes {
+            if !recalculated.notes.contains(note) {
+                recalculated.notes.push(note.clone());
+            }
+        }
+        if previous.status == "blocked"
+            || previous.status == "unverified" && recalculated.evidence.is_empty()
+        {
+            recalculated.status = previous.status.clone();
+        }
+    }
+    recalculated
 }
 
 fn matches(book: &Book, work: &timeline::Work) -> bool {
@@ -140,7 +245,12 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
         }
         let inputs = facts::chunks(&document.page);
         let total = inputs.len();
-        for (position, chunk) in document.chunks.iter().enumerate() {
+        let expected_hashes = inputs
+            .iter()
+            .map(|input| serde_json::to_vec(input).map(|raw| sources::hash(&raw)))
+            .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+        let mut seen_hashes = BTreeSet::new();
+        for chunk in &document.chunks {
             facts::validate(chunk)?;
             if chunk.evidence.source.sha256 != document.page.source.sha256
                 || chunk.evidence.source.location != document.page.source.location
@@ -155,8 +265,8 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
             {
                 bail!("Universe facts do not match their retained source snapshot");
             }
-            if position >= total
-                || chunk.segments_hash != sources::hash(&serde_json::to_vec(&inputs[position])?)
+            if !expected_hashes.contains(&chunk.segments_hash)
+                || !seen_hashes.insert(chunk.segments_hash.clone())
             {
                 bail!("Extraction does not cover its recorded source chunk");
             }
@@ -230,10 +340,55 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
         run.notes.push(format!("Complete {universe} bibliography coverage has not been verified; subset ranks cannot be exported"));
         return Ok(run);
     }
-    let bundles = selected
+    let mut bundles = selected
         .iter()
         .map(|c| c.evidence.clone())
         .collect::<Vec<_>>();
+    let works = bundles
+        .iter()
+        .flat_map(|b| b.facts.works.iter().cloned())
+        .collect::<Vec<_>>();
+    let source_keys = selected
+        .iter()
+        .map(|c| {
+            (
+                c.evidence.source.location.clone(),
+                c.evidence.source.sha256.clone(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    for document in corpus.pages.values().filter(|d| {
+        source_keys.contains(&(d.page.source.location.clone(), d.page.source.sha256.clone()))
+    }) {
+        for relations in timeline::ordered_relationships(&document.page.source, &works).chunks(32) {
+            let mut source = document.page.source.clone();
+            source.segments.retain(|s| {
+                relations
+                    .iter()
+                    .flat_map(|r| &r.citations)
+                    .any(|c| c.segment == s.ordinal)
+            });
+            let evidence = timeline::Evidence {
+                source,
+                facts: timeline::Facts {
+                    works: vec![],
+                    relations: relations.to_vec(),
+                },
+                fetched_at: document.page.fetched_at,
+            };
+            timeline::validate(&evidence)?;
+            let chunk = Chunk {
+                segments_hash: sources::hash(&serde_json::to_vec(&evidence.source.segments)?),
+                evidence: evidence.clone(),
+                coverage: vec![],
+                extraction_version: facts::VERSION.into(),
+                model_digest: "deterministic-chronology-list-v1".into(),
+                rejected_claims: vec![],
+            };
+            run.evidence.push(proof(&chunk));
+            bundles.push(evidence);
+        }
+    }
     let placements = timeline::solve(&bundles)?;
     let keys = identities
         .iter()
@@ -343,6 +498,8 @@ pub fn research_book(
         .store
         .cached_value::<Corpus>(CORPUS_KEY)?
         .unwrap_or_default();
+    align_chunk_plans(&app.store, &mut corpus)?;
+    app.store.cache_value(CORPUS_KEY, &corpus)?;
     if !refresh {
         let run = calculate(book, &corpus)?;
         if run.status == "ready" {
@@ -363,6 +520,78 @@ pub fn research_book(
         .find(|m| m.name == app.data.ai_settings.model && m.usable)
         .context("Installed local extraction model is unavailable")?;
     let author = book.authors.first().context("Writing author is missing")?;
+    let identity_known = corpus
+        .pages
+        .values()
+        .flat_map(|d| &d.chunks)
+        .flat_map(|c| &c.evidence.facts.works)
+        .any(|w| matches(book, w) && w.universe.is_some());
+    let mut cached_calls = 0;
+    let mut cached_pages = 0;
+    let mut cached_errors = Vec::new();
+    if !refresh && !identity_known {
+        for document in corpus.pages.values_mut().filter(|d| {
+            facts::fresh(d.page.fetched_at)
+                && d.page
+                    .source
+                    .segments
+                    .iter()
+                    .any(|s| s.text.to_lowercase().contains(&book.title.to_lowercase()))
+        }) {
+            if cached_pages >= page_budget || cached_calls >= extraction_budget {
+                break;
+            }
+            let pending = pending_chunk_indices(document, book)?;
+            if pending.is_empty() {
+                continue;
+            }
+            cached_pages += 1;
+            let inputs = facts::chunks(&document.page);
+            for index in pending {
+                if cached_calls >= extraction_budget {
+                    break;
+                }
+                cached_calls += 1;
+                match facts::extract(
+                    &app.store,
+                    Some((&client, &model)),
+                    book,
+                    &document.page,
+                    &inputs[index],
+                ) {
+                    Ok(chunk) => {
+                        document.chunks.push(chunk);
+                        document.processed = document.chunks.len();
+                    }
+                    Err(error) => {
+                        cached_errors.push(error.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+        app.store.cache_value(CORPUS_KEY, &corpus)?;
+        let mut run = calculate(book, &corpus)?;
+        if run.status == "ready" || cached_calls >= extraction_budget || cached_pages >= page_budget
+        {
+            run.model = model.name;
+            run.digest = model.digest;
+            let failed = !cached_errors.is_empty();
+            run.notes.extend(cached_errors);
+            if failed && run.status == "research_pending" {
+                run.status = "blocked".into();
+            }
+            if run.status == "research_pending" && !run.notes.is_empty() {
+                run.notes.push(
+                    "Cached-source extraction checkpoint retained; no new web search was performed"
+                        .into(),
+                );
+            }
+            return Ok(run);
+        }
+    }
+    let page_budget = page_budget - cached_pages;
+    let extraction_budget = extraction_budget - cached_calls;
     let known = corpus
         .pages
         .values()
@@ -411,8 +640,8 @@ pub fn research_book(
         };
     }
     let mut pending = Vec::new();
-    let mut notes = Vec::new();
-    let mut operational = false;
+    let mut operational = !cached_errors.is_empty();
+    let mut notes = cached_errors;
     for query in &queries {
         app.discover_sites(query, refresh)?;
         let search = app
@@ -469,7 +698,8 @@ pub fn research_book(
             .collect::<Vec<_>>(),
     );
     pending.retain(|url| {
-        !investigation.completed_urls.contains(url)
+        refresh
+            || !investigation.completed_urls.contains(url)
             || corpus
                 .pages
                 .get(url)
@@ -513,19 +743,24 @@ pub fn research_book(
                 processed: 0,
                 chunks: vec![],
             };
+        } else {
+            document.page = page.clone();
         }
-        while document.processed < source_chunks.len() && calls < extraction_budget {
+        for input_index in pending_chunk_indices(document, book)? {
+            if calls >= extraction_budget {
+                break;
+            }
             calls += 1;
             match facts::extract(
                 &app.store,
                 Some((&client, &model)),
                 book,
                 &page,
-                &source_chunks[document.processed],
+                &source_chunks[input_index],
             ) {
                 Ok(chunk) => {
                     document.chunks.push(chunk);
-                    document.processed += 1;
+                    document.processed = document.chunks.len();
                 }
                 Err(error) => {
                     operational = true;

@@ -9,4 +9,4 @@
 - No extra agents, paid research APIs, model downloads or benchmarks without explicit authorization.
 - Default tests are offline. Live HTTP/model tests require explicit opt-in.
 - Do not commit or push unless explicitly requested.
-- This repository depends on sibling `../calibre-curator/crates/curator-core`; it does not depend on `nexus-mediastack`.
+- The required MIT-licensed core is checked in under `vendor/curator-core`; no sibling checkout is required. Preserve its license and `UPSTREAM.json`.

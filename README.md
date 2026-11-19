@@ -8,6 +8,20 @@ The guarded temporary-library workflow has passed, but whole-library curation is
 **not complete**. Source discovery, extraction and incomplete bibliography cases can
 still require automatic retry. Old metadata and research are leads, not proof.
 
+## Deployment readiness
+The full authorized validation run on 2026-11-19 passed:
+- All 53 Rust tests, including the three opt-in public-HTTP/local-model tests.
+- All 74 Python tests under Calibre Python, including all six native API tests.
+- System Python: 74 tests ran, with the six native-only tests skipped.
+- Formatting, Python syntax and whitespace checks. Clippy completed with warnings.
+
+This is a tested development snapshot, **not approval for unattended whole-library
+deployment**. Independent per-series completeness and source corroboration remain
+unfinished. The previously external core is now vendored with its source hashes
+and license; the tested build does not require another checkout.
+No existing ebook library was modified
+by the validation suite; native writes were confined to temporary fixtures.
+
 ## Layout
 - `scripts/calibre_auto_curate.py`: batch workflow, evidence validation, retry/review inspection and guarded application.
 - `scripts/calibre_chronology.py`: sparse metadata importer, dry-run, rehearsal, backup and readback.
@@ -19,15 +33,11 @@ still require automatic retry. Old metadata and research are leads, not proof.
 
 ## Dependencies
 Python 3, Rust/Cargo and installed Calibre (`calibre-debug`) are required.
-The Rust adapter currently depends on `curator-core` from a sibling checkout:
-
-    Repos/
-      calibre-library-curation/
-      calibre-curator/crates/curator-core/
-
-That dependency remains explicit in `tools/calibre-research/Cargo.toml`; no
-media-stack repository is needed. Do not assume an arbitrary upstream Curator
-revision contains the local research API changes. Optional inference uses the
+The exact required `curator-core` source is checked in under `vendor/curator-core`,
+with its MIT license and upstream revision/file hashes in `UPSTREAM.json`.
+No sibling Curator or media-stack checkout is required. Generated build output
+defaults to this project's `target/`; `CARGO_TARGET_DIR` may select another cache.
+Optional inference uses the
 installed local Ollama model; tests requiring inference or public HTTP are ignored
 unless explicitly enabled. No paid research/model API is configured.
 
@@ -36,8 +46,7 @@ Run from this repository:
 
 ```fish
 python3 -m unittest discover -s tests -p 'test_calibre*.py' -v
-env CARGO_TARGET_DIR=../calibre-curator/target \
-  cargo test --offline --manifest-path tools/calibre-research/Cargo.toml
+cargo test --locked --offline --manifest-path tools/calibre-research/Cargo.toml
 ```
 
 The Rust workflow test creates and writes only a new temporary library. Its normal
@@ -47,6 +56,14 @@ Relocation verification: the Python suite ran 69 tests with 6 native-runtime ski
 Rust ran 39 passing tests with 3 opt-in skips. The guarded temporary-library
 workflow passed from this repository. These checks do not certify the chronology
 of the actual library.
+The later author-boundary regression run passed 50 Rust tests (3 opt-in skips).
+The wrapper's `apply_status` contract is documented in
+`docs/CALIBRE-CHRONOLOGY.md`, with all outcomes covered by offline tests.
+After vendoring the required core, the full authorized run passed all 53 Rust
+tests (including the live/local-model gates) and all 74 Python tests under
+isolated Calibre Python. Builds no longer require another working checkout.
+Evidence completeness, independent per-series coverage and source corroboration
+are still required before unattended whole-library curation can be considered complete.
 
 ## Use
 The default target is the existing verified duplicate:

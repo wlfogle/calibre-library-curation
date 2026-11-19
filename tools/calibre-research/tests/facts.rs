@@ -21,6 +21,75 @@ fn book() -> Book {
     }
 }
 
+#[test]
+fn retained_proposal_is_replayed_without_repeating_model_inference() {
+    use curator_core::ai::{AiModel, AiSettings, Ollama};
+    let root = tempfile::tempdir().unwrap();
+    let store = Store::open(root.path()).unwrap();
+    let original = chunk();
+    let page = chronology::Page {
+        source: original.evidence.source,
+        links: vec![],
+        fetched_at: 1,
+    };
+    let extraction = facts::Extraction {
+        facts: original.evidence.facts,
+        coverage: original.coverage,
+    };
+    let model = AiModel {
+        name: "offline-fixture-not-an-installed-model".into(),
+        digest: "f".repeat(64),
+        size: 1_000_000,
+        usable: true,
+        reason: String::new(),
+    };
+    let client = Ollama::new(&AiSettings::default()).unwrap();
+    let segment_hash = sources::hash(&serde_json::to_vec(&page.source.segments).unwrap());
+    let key = format!(
+        "facts:{}:diagnostic",
+        sources::hash(
+            &serde_json::to_vec(&json!({
+                "version":"cited-temporal-facts-v4","source":page.source.sha256,
+                "segments":segment_hash,"model":model.digest
+            }))
+            .unwrap()
+        )
+    );
+    store
+        .cache_value(
+            &key,
+            &json!({
+                "book":book(),"source":page.source,"segments":page.source.segments,
+                "response":{"done":true,"done_reason":"stop",
+                    "message":{"content":serde_json::to_string(&extraction).unwrap()}}
+            }),
+        )
+        .unwrap();
+    // The named model does not exist: success requires using the retained response.
+    let result = facts::extract(
+        &store,
+        Some((&client, &model)),
+        &book(),
+        &page,
+        &page.source.segments,
+    )
+    .unwrap();
+    assert_eq!(result.evidence.facts.works[0].title, "New Work");
+    assert_eq!(result.extraction_version, facts::VERSION);
+    let verified_key=format!("facts:{}:diagnostic",sources::hash(&serde_json::to_vec(&json!({
+        "version":facts::VERSION,"source":page.source.sha256,"segments":segment_hash,
+        "model":model.digest,
+        "identity_hint":{"title":book().title,"authors":book().authors,"identifiers":book().identifiers}
+    })).unwrap()));
+    assert_eq!(
+        store
+            .cached_value::<serde_json::Value>(&verified_key)
+            .unwrap()
+            .unwrap()["proposal_replayed"],
+        true
+    );
+}
+
 fn chunk() -> facts::Chunk {
     let page = chronology::parse_page(
         b"<h1>Complete chronology of New Universe</h1><p>New Work by New Writer in New Universe is set in 100 AD.</p>",
@@ -266,4 +335,85 @@ fn retained_installed_model_response_replays_without_inference() {
         .iter()
         .any(|r| r.field == "setting" && r.subject == "New Work"));
     assert!(result.rejected_claims.iter().any(|r| r.field == "relation"));
+}
+
+#[test]
+fn explicit_author_chronology_scope_binds_real_table_facts_but_forum_branding_does_not() {
+    // Short factual excerpt from the retained source; no network/model call.
+    for (heading, accepted) in [
+        (
+            "Comprehensive Chronology of R.A. Salvatore Forgotten Realms Works",
+            true,
+        ),
+        ("RASalvatore Forums - Forgotten Realms", false),
+        (
+            "Chronology of R.A. Salvatore at Forgotten Realms conventions",
+            false,
+        ),
+        (
+            "Comprehensive Chronology of R.A. Salvatorem Forgotten Realms Works",
+            false,
+        ),
+    ] {
+        let html = format!(
+            "<title>{heading}</title><table><tr><td>&lt; The Crystal Shard &gt;</td>\
+            <td>1350 DR, SUM – 1356 DR, SPR</td></tr></table>"
+        );
+        let page =
+            chronology::parse_page(html.as_bytes(), "https://example.org/chronology").unwrap();
+        let row = page
+            .source
+            .segments
+            .iter()
+            .find(|s| s.kind == "tr")
+            .unwrap();
+        let citation = vec![curator_core::ai::Citation {
+            segment: row.ordinal,
+            quote: row.text.clone(),
+        }];
+        let work = timeline::Work {
+            title: "The Crystal Shard".into(),
+            authors: vec!["R. A. Salvatore".into()],
+            universe: Some("Forgotten Realms".into()),
+            standalone: true,
+            memberships: vec![],
+            settings: vec![timeline::Setting {
+                calendar: "dr".into(),
+                literal: "1350 DR, SUM – 1356 DR, SPR".into(),
+                role: "principal".into(),
+                citations: citation.clone(),
+            }],
+            contains: vec![],
+            citations: citation,
+        };
+        let result = facts::screen(
+            facts::Extraction {
+                facts: timeline::Facts {
+                    works: vec![work],
+                    relations: vec![],
+                },
+                coverage: vec![],
+            },
+            &page,
+            &page.source.segments,
+            "retained-proposal-shape",
+        )
+        .unwrap();
+        if accepted {
+            assert_eq!(result.evidence.facts.works.len(), 1);
+            let work = &result.evidence.facts.works[0];
+            assert!(!work.standalone);
+            assert_eq!(work.universe.as_deref(), Some("Forgotten Realms"));
+            assert_eq!(work.settings.len(), 1);
+            assert_eq!(work.settings[0].literal, "1350 DR, SUM – 1356 DR, SPR");
+            assert!(result
+                .rejected_claims
+                .iter()
+                .any(|r| r.field == "standalone"));
+            assert!(result.coverage.iter().all(|c| !c.complete));
+        } else {
+            assert!(result.evidence.facts.works.is_empty());
+            assert!(result.rejected_claims.iter().any(|r| r.field == "identity"));
+        }
+    }
 }

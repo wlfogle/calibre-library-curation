@@ -207,6 +207,36 @@ fn abbreviated_year_ranges_from_the_live_source_expand_without_reversing_time() 
 }
 
 #[test]
+fn seasonal_dalereckoning_ranges_retain_both_years_without_inventing_season_positions() {
+    let range = timeline::interval("dr", "1350 DR, SUM – 1356 DR, SPR").unwrap();
+    assert_eq!((range.first, range.last), (1350, 1356));
+    assert!(timeline::interval("ad", "1350 DR, SUM – 1356 DR, SPR").is_err());
+    assert!(timeline::interval("dr", "1356 DR, SPR – 1350 DR, SUM").is_err());
+    assert!(timeline::interval("ad", "1350 DR").is_err());
+    assert!(timeline::interval("dr", "1350 AD").is_err());
+}
+
+#[test]
+fn a_table_range_cannot_be_silently_truncated_to_its_first_year() {
+    let text="Title: Some Book | Author: Test Writer | Universe: Test World | Story date: 1350 DR, SUM – 1356 DR, SPR".to_string();
+    let work = dated(
+        "Some Book",
+        "Test Writer",
+        "Test World",
+        "dr",
+        "1350 DR",
+        None,
+        1,
+        &text,
+    );
+    let mut bundle = evidence(&[text], vec![work], vec![]);
+    bundle.source.segments[0].kind = "tr".into();
+    assert!(timeline::validate(&bundle).is_err());
+    bundle.facts.works[0].settings[0].literal = "1350 DR, SUM – 1356 DR, SPR".into();
+    timeline::validate(&bundle).unwrap();
+}
+
+#[test]
 fn correctly_bound_story_date_survives_a_publication_column() {
     let text = "Title: Some Book | Author: Test Writer | Universe: Test World | Publication date: 2000 AD | In-universe chronology: 1500 AD".to_string();
     let work = dated(

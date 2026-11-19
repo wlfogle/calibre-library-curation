@@ -234,7 +234,7 @@ pub struct Relation {
     pub universe: String,
     pub before: String,
     pub after: String,
-    /// Only "story_time" orders books. "publication"/"recommended" are not chronology.
+    /// Story-time constraints order books; story_time_list is derived only by Rust.
     pub basis: String,
     pub citations: Vec<Citation>,
 }
@@ -286,8 +286,54 @@ fn proof(citations: &[Citation], source: &Source) -> Result<String> {
     curator_core::ai::citations_text(citations, &source.segments)
 }
 
+pub(crate) fn author_cited(text: &str, author: &str) -> bool {
+    let letters = author
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .map(|c| regex::escape(&c.to_string()))
+        .collect::<Vec<_>>();
+    !letters.is_empty()
+        && Regex::new(&format!(r"(?i)\b{}\b", letters.join(r"[\s\p{P}]*")))
+            .is_ok_and(|pattern| pattern.is_match(text))
+}
+
 pub fn interval(calendar: &str, literal: &str) -> Result<Interval> {
     let raw = literal.trim().replace(['–', '—'], "-");
+    let seasonal = Regex::new(concat!(
+        r"(?i)^\s*(-?\d+)\s*(DR|AD|CE|PC|AC)",
+        r"(?:\s*,?\s*(?:SPR(?:ING)?|SUM(?:MER)?|AUT(?:UMN)?|FALL?|WIN(?:TER)?))?",
+        r"\s*-\s*(-?\d+)\s*(DR|AD|CE|PC|AC)",
+        r"(?:\s*,?\s*(?:SPR(?:ING)?|SUM(?:MER)?|AUT(?:UMN)?|FALL?|WIN(?:TER)?))?\s*$"
+    ))?;
+    if let Some(caps) = seasonal.captures(&raw) {
+        let a = caps[1].parse::<i64>()?;
+        let b = caps[3].parse::<i64>()?;
+        let suffix_a = caps[2].to_uppercase();
+        let suffix_b = caps[4].to_uppercase();
+        let compatible = |suffix: &str| match calendar.to_lowercase().as_str() {
+            "dr" => suffix == "DR",
+            "krynn" => ["PC", "AC"].contains(&suffix),
+            "ad" | "ce" => ["AD", "CE"].contains(&suffix),
+            _ => false,
+        };
+        if !compatible(&suffix_a) || !compatible(&suffix_b) {
+            bail!("Date calendar does not match its cited era");
+        }
+        let first = if suffix_a == "PC" {
+            a.checked_neg().context("Date overflow")?
+        } else {
+            a
+        };
+        let last = if suffix_b == "PC" {
+            b.checked_neg().context("Date overflow")?
+        } else {
+            b
+        };
+        if first > last {
+            bail!("Reversed date range");
+        }
+        return Ok(Interval { first, last });
+    }
     let imperial = Regex::new(
         r"(?i)^\s*(?:~\s*|c\.?\s*)?(?:\d\.)?(?:\d{3}\.)?(?:(\d{1,3})\s*-\s*)?(\d{1,3})(s)?\.M(\d{1,2})\s*\??\s*$",
     )?;
@@ -347,11 +393,14 @@ pub fn interval(calendar: &str, literal: &str) -> Result<Interval> {
             }
         }
     }
-    if calendar.eq_ignore_ascii_case("krynn") && !["PC", "AC"].contains(&suffix.as_str()) {
-        bail!("Krynn dates require PC or AC");
-    }
-    if calendar.eq_ignore_ascii_case("dr") && suffix != "DR" {
-        bail!("Dalereckoning dates require DR");
+    let compatible = match calendar.to_lowercase().as_str() {
+        "krynn" => ["PC", "AC"].contains(&suffix.as_str()),
+        "dr" => suffix == "DR",
+        "ad" | "ce" => ["", "AD", "CE"].contains(&suffix.as_str()),
+        _ => false,
+    };
+    if !compatible {
+        bail!("Date calendar does not match its cited era");
     }
     if !["krynn", "dr", "ad", "ce"].contains(&calendar.to_lowercase().as_str()) {
         bail!("Calendar conversion is not established; do not compare unrelated dates");
@@ -378,6 +427,8 @@ fn temporal_language(text: &str) -> bool {
         "takes place",
         "time of work",
         "story time",
+        "story date",
+        "fictional date",
         "fictional",
         "principal narrative",
     ]
@@ -395,10 +446,7 @@ pub fn validate(evidence: &Evidence) -> Result<()> {
         if work.title.trim().is_empty()
             || !normalized.contains(&normalize(&work.title))
             || work.authors.is_empty()
-            || !work
-                .authors
-                .iter()
-                .any(|a| normalized.contains(&normalize(a)))
+            || !work.authors.iter().any(|a| author_cited(&text, a))
         {
             bail!("Work title/author is not established by cited source text");
         }
@@ -454,7 +502,29 @@ pub fn validate(evidence: &Evidence) -> Result<()> {
             {
                 bail!("Fictional setting/date is not established");
             }
-            interval(&setting.calendar, &setting.literal)?;
+            let claimed = interval(&setting.calendar, &setting.literal)?;
+            for citation in &setting.citations {
+                if let Some(row) = evidence
+                    .source
+                    .segments
+                    .iter()
+                    .find(|s| s.ordinal == citation.segment && s.kind == "tr")
+                {
+                    for cell in row.text.split(" | ") {
+                        let value = cell
+                            .split_once(':')
+                            .map(|(_, v)| v.trim())
+                            .unwrap_or(cell.trim());
+                        if normalize(value).contains(&normalize(&setting.literal)) {
+                            if let Ok(actual) = interval(&setting.calendar, value) {
+                                if actual != claimed {
+                                    bail!("Date claim truncates the cited story interval");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         for part in &work.contains {
             if !normalized.contains(&normalize(part))
@@ -481,7 +551,14 @@ pub fn validate(evidence: &Evidence) -> Result<()> {
         {
             bail!("Ordering relationship omits its works or universe");
         }
-        if !["story_time", "publication", "recommended"].contains(&relation.basis.as_str()) {
+        if ![
+            "story_time",
+            "story_time_list",
+            "publication",
+            "recommended",
+        ]
+        .contains(&relation.basis.as_str())
+        {
             bail!("Unknown ordering basis");
         }
         if relation.basis == "publication"
@@ -497,6 +574,9 @@ pub fn validate(evidence: &Evidence) -> Result<()> {
                 .any(|s| text.to_lowercase().contains(s))
         {
             bail!("Recommended relationship is not explicitly sourced");
+        }
+        if relation.basis == "story_time_list" && !ordered_direction(relation, &evidence.source) {
+            bail!("Chronology-list relationship is not established by the source structure");
         }
         if relation.basis == "story_time" {
             if !temporal_language(&text) {
@@ -519,6 +599,171 @@ pub fn validate(evidence: &Evidence) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn ordered_coordinates(segment: &curator_core::model::Segment) -> Option<(usize, usize, usize)> {
+    let parts = segment.kind.split(':').collect::<Vec<_>>();
+    if parts.len() != 4 || parts[0] != "ordered" {
+        return None;
+    }
+    let values = (
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+        parts[3].parse().ok()?,
+    );
+    if values.0 == 0 || values.1 == 0 || values.2 == 0 {
+        return None;
+    }
+    Some(values)
+}
+
+pub(crate) fn chronological_heading(text: &str, universe: &str) -> bool {
+    let text = text.to_lowercase();
+    normalize(&text).contains(&normalize(universe))
+        && text.contains("chronolog")
+        && ![
+            "publication",
+            "published",
+            "release",
+            "recommend",
+            "possible",
+            "uncertain",
+            "disputed",
+        ]
+        .iter()
+        .any(|s| text.contains(s))
+}
+
+fn entry_names(segment: &curator_core::model::Segment, title: &str) -> bool {
+    let Some((_, number, _)) = ordered_coordinates(segment) else {
+        return false;
+    };
+    let prefix = format!("{number}. ");
+    let Some(label) = segment.text.strip_prefix(&prefix) else {
+        return false;
+    };
+    let label = label.to_lowercase();
+    let title = title.trim().to_lowercase();
+    if title.is_empty() {
+        return false;
+    }
+    let Some(suffix) = label.strip_prefix(&title) else {
+        return false;
+    };
+    let suffix = suffix.trim_start();
+    suffix.is_empty()
+        || ["(", "[", "—", "–", "-", "by "]
+            .iter()
+            .any(|s| suffix.starts_with(s))
+}
+
+fn ordered_direction(relation: &Relation, source: &Source) -> bool {
+    let cited = |s: &curator_core::model::Segment| {
+        relation
+            .citations
+            .iter()
+            .any(|c| c.segment == s.ordinal && c.quote == s.text)
+    };
+    let before = source
+        .segments
+        .iter()
+        .filter(|s| cited(s) && entry_names(s, &relation.before))
+        .collect::<Vec<_>>();
+    let after = source
+        .segments
+        .iter()
+        .filter(|s| cited(s) && entry_names(s, &relation.after))
+        .collect::<Vec<_>>();
+    if before.len() != 1 || after.len() != 1 {
+        return false;
+    }
+    let a = before[0];
+    let b = after[0];
+    let (Some((heading, first, size)), Some((other, last, other_size))) =
+        (ordered_coordinates(a), ordered_coordinates(b))
+    else {
+        return false;
+    };
+    if heading != other || size != other_size || first >= last || a.ordinal >= b.ordinal {
+        return false;
+    }
+    let mut positions = BTreeSet::new();
+    if source
+        .segments
+        .iter()
+        .filter_map(ordered_coordinates)
+        .filter(|(h, _, s)| *h == heading && *s == size)
+        .any(|(_, n, _)| !positions.insert(n))
+    {
+        return false;
+    }
+    source.segments.iter().any(|s| {
+        s.ordinal == heading
+            && s.kind.starts_with('h')
+            && cited(s)
+            && chronological_heading(&s.text, &relation.universe)
+    })
+}
+
+/// HTML list positions are evidence of relationships, never final Calibre ranks.
+pub fn ordered_relationships(source: &Source, works: &[Work]) -> Vec<Relation> {
+    let mut groups: BTreeMap<(usize, usize), Vec<&curator_core::model::Segment>> = BTreeMap::new();
+    for segment in &source.segments {
+        if let Some((heading, _, size)) = ordered_coordinates(segment) {
+            groups.entry((heading, size)).or_default().push(segment);
+        }
+    }
+    let mut output = Vec::new();
+    for ((heading, _), mut rows) in groups {
+        let Some(context) = source.segments.iter().find(|s| s.ordinal == heading) else {
+            continue;
+        };
+        rows.sort_by_key(|s| s.ordinal);
+        for pair in rows.windows(2) {
+            let identify = |row| {
+                let matches = works
+                    .iter()
+                    .filter(|w| entry_names(row, &w.title))
+                    .map(|w| ((key(w), w.universe.clone()), w))
+                    .collect::<BTreeMap<_, _>>();
+                if matches.len() == 1 {
+                    matches.values().next().copied()
+                } else {
+                    None
+                }
+            };
+            let (Some(a), Some(b)) = (identify(pair[0]), identify(pair[1])) else {
+                continue;
+            };
+            let Some(universe) = a
+                .universe
+                .as_ref()
+                .filter(|u| b.universe.as_ref() == Some(u))
+            else {
+                continue;
+            };
+            if !chronological_heading(&context.text, universe) {
+                continue;
+            }
+            let relation = Relation {
+                universe: universe.clone(),
+                before: a.title.clone(),
+                after: b.title.clone(),
+                basis: "story_time_list".into(),
+                citations: [context, pair[0], pair[1]]
+                    .iter()
+                    .map(|s| Citation {
+                        segment: s.ordinal,
+                        quote: s.text.clone(),
+                    })
+                    .collect(),
+            };
+            if ordered_direction(&relation, source) {
+                output.push(relation);
+            }
+        }
+    }
+    output
 }
 
 #[derive(Default)]
@@ -629,7 +874,9 @@ pub fn solve(evidence: &[Evidence]) -> Result<Vec<Placement>> {
         let mut temporal_nodes: BTreeSet<String> = dates.keys().cloned().collect();
         for bundle in evidence {
             for relation in &bundle.facts.relations {
-                if relation.universe != universe || relation.basis != "story_time" {
+                if relation.universe != universe
+                    || !["story_time", "story_time_list"].contains(&relation.basis.as_str())
+                {
                     continue;
                 }
                 let before = by_title.get(&normalize(&relation.before));

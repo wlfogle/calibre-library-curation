@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1"
-curator-core = { path = "../../../calibre-curator/crates/curator-core" }
+curator-core = { path = "../../vendor/curator-core" }
 libc = "0.2"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

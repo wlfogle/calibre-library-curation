@@ -130,3 +130,127 @@ fn unknown_existing_memberships_are_retained_and_not_marked_verified() {
     assert_eq!(result.hierarchy[3], book.hierarchy[3]);
     assert!(!result.field_mask[3]);
 }
+
+#[test]
+fn export_revalidation_retains_blocked_source_diagnostics_until_evidence_resolves_them() {
+    let (book, complete) = fixture();
+    let empty = curation::Corpus::default();
+    let mut previous = curation::calculate(&book, &empty).unwrap();
+    previous.status = "blocked".into();
+    previous
+        .notes
+        .push("Source HTTP 403: https://example.org/chronology".into());
+    previous.queries.push("targeted source query".into());
+    let pending =
+        curation::preserve_research_context(&previous, curation::calculate(&book, &empty).unwrap());
+    assert_eq!(pending.status, "blocked");
+    assert!(pending.notes.iter().any(|n| n.contains("HTTP 403")));
+    assert_eq!(pending.queries, previous.queries);
+    let resolved = curation::preserve_research_context(
+        &previous,
+        curation::calculate(&book, &complete).unwrap(),
+    );
+    assert_eq!(resolved.status, "ready");
+    assert!(!resolved.notes.iter().any(|n| n.contains("HTTP 403")));
+}
+
+#[test]
+fn relevant_later_passages_are_prioritized_without_discarding_other_chunks() {
+    let (mut book, _) = fixture();
+    book.title = "Target Book".into();
+    let html = format!(
+        "<h1>Target Book chronology</h1>{}<p>Target Book is set in 1350 DR.</p>",
+        (0..20)
+            .map(|i| format!("<p>Navigation entry {i}</p>"))
+            .collect::<String>()
+    );
+    let page =
+        curator_core::chronology::parse_page(html.as_bytes(), "https://example.org/timeline")
+            .unwrap();
+    let inputs = facts::chunks(&page);
+    let mut document = curation::Document {
+        page,
+        processed: 0,
+        chunks: vec![],
+    };
+    let order = curation::pending_chunk_indices(&document, &book).unwrap();
+    assert_eq!(order.len(), inputs.len());
+    assert!(order[0] > 0);
+    assert!(inputs[order[0]]
+        .iter()
+        .any(|s| s.kind == "p" && s.text.contains("1350 DR")));
+    let chunk = facts::screen(
+        facts::Extraction {
+            facts: timeline::Facts::default(),
+            coverage: vec![],
+        },
+        &document.page,
+        &inputs[order[0]],
+        "offline",
+    )
+    .unwrap();
+    document.chunks.push(chunk);
+    document.processed = 1;
+    let resumed = curation::pending_chunk_indices(&document, &book).unwrap();
+    assert_eq!(resumed.len(), inputs.len() - 1);
+    assert!(!resumed.contains(&order[0]));
+}
+
+#[test]
+fn old_chunk_plans_are_archived_but_edited_snapshots_are_not_migrated() {
+    let (book, _) = fixture();
+    let page = curator_core::chronology::parse_page(
+        b"<h1>New Universe</h1><p>First</p><p>Second</p><p>Third</p>",
+        "https://example.org/timeline",
+    )
+    .unwrap();
+    let old = facts::screen(
+        facts::Extraction {
+            facts: timeline::Facts::default(),
+            coverage: vec![],
+        },
+        &page,
+        &page.source.segments,
+        "old-plan",
+    )
+    .unwrap();
+    let url = page.source.location.clone();
+    let mut corpus = curation::Corpus::default();
+    corpus.pages.insert(
+        url.clone(),
+        curation::Document {
+            page,
+            processed: 1,
+            chunks: vec![old],
+        },
+    );
+    let original = corpus.clone();
+    corpus
+        .investigations
+        .entry("fixture".into())
+        .or_default()
+        .completed_urls
+        .insert(url.clone());
+    let root = tempfile::tempdir().unwrap();
+    let store = curator_core::store::Store::open(root.path()).unwrap();
+    let bytes = serde_json::to_vec(&corpus.pages[&url]).unwrap();
+    let key = format!(
+        "archived-source-plan:{}",
+        curator_core::sources::hash(&bytes)
+    );
+    curation::align_chunk_plans(&store, &mut corpus).unwrap();
+    assert!(corpus.pages[&url].chunks.is_empty());
+    assert!(!corpus.investigations["fixture"]
+        .completed_urls
+        .contains(&url));
+    assert!(store
+        .cached_value::<curation::Document>(&key)
+        .unwrap()
+        .is_some());
+    let mut edited = original;
+    edited.pages.get_mut(&url).unwrap().page.source.segments[1]
+        .text
+        .push_str(" edited");
+    assert!(curation::align_chunk_plans(&store, &mut edited).is_err());
+    assert!(curation::calculate(&book, &edited).is_err());
+}

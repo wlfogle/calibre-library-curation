@@ -2,6 +2,18 @@
 
 Read relevant entries before planning or editing. Newer evidence-policy corrections supersede historical trust claims. Keep reports factual, preserve both libraries, and diagnose saved failures offline before spending more calls.
 
+### [2026-11-19] Keep required dependency changes reproducible inside this project
+**Mistake:** The new repository required uncommitted changes in a sibling `curator-core` checkout, so publishing this repository alone did not reproduce the tested build.
+**Root cause:** Retained an external path dependency after extracting the project.
+**Prevention:** Preserve the exact required core source, license and provenance in `vendor/curator-core`; use the checked-in lockfile and keep build output configurable but outside libraries.
+**Verification:** Vendored source hashes match the tested core. Dependency resolution uses this repository only; all 53 Rust and 74 Calibre-Python tests passed. The sibling repository was not changed or committed.
+
+### [2026-11-19] Passing tests against an uncommitted dependency do not establish reproducible deployment
+**Mistake:** Before vendoring, the extracted project built against locally modified sibling `curator-core`, so a clean checkout at that sibling's HEAD alone could not reproduce the validated build.
+**Root cause:** The project retained a path dependency while its required parser/research changes remained outside this repository's commits.
+**Prevention:** Commit/pin or vendor the required dependency before claiming deployment readiness. Do not commit another repository or silently substitute an upstream revision without authorization.
+**Verification:** That validation used sibling HEAD `cde2c547d6870e4ba2f5ccf7b0925b02ff8b92c7` with five modified core files. The later vendored snapshot resolves the dependency reproducibility issue; complete per-series/source verification is a separate remaining requirement.
+
 ### [2026-11-19] Rebuild location-dependent Rust artifacts after moving the project
 **Mistake:** The first post-move Rust run reused a shared cached test binary containing the old compile-time repository path.
 **Root cause:** File timestamps were preserved during relocation, while the test embeds `CARGO_MANIFEST_DIR`.
@@ -29,14 +41,15 @@ Read relevant entries before planning or editing. Newer evidence-policy correcti
 ### [2026-11-19] Preserve main series plus ALL THREE sub-series fields and verify their placement
 **Mistake:** Repeatedly emphasized a three-level example instead of consistently addressing all four available Calibre levels, and treated implementing a hierarchy as progress toward verified placement without establishing the placement itself.
 **Root cause:** Confused data representation with bibliographic verification and did not consistently distinguish sub-series depth from the number of available fields.
-**Prevention:** The schema is main `series` plus `#series2`, `#series3` and `#series4`, each with its own independent index. Preserve genuine nested and overlapping memberships. Greater Eternal Champion Saga is the user's verified IN-UNIVERSE chronological reference, not publication order. Do not infer that other stored metadata is verified or that a repeated universe label is a genuine sub-series.
+**Prevention:** The schema is main `series` plus `#series2`, `#series3` and `#series4`, each with its own independent index. Preserve genuine nested and overlapping memberships. Greater Eternal Champion Saga is an in-universe structural/numbering reference, not a publication-order template; its old numbers are not fresh factual evidence. Do not infer that stored metadata is verified or that a repeated universe label is a genuine sub-series.
 **Verification:** Test all four name/index pairs, actual verified reference assignments, nested and parallel memberships, and preservation of protected books. Structural fixtures do not establish real-book chronology.
 
 ### [2026-11-19] Diagnose rejected model output instead of repeatedly guessing prompts
-**Mistake:** Repeated local-model acceptance runs failed on an unsupported parent-series claim, an inferred temporal relationship, coverage and finally a missing calculated rank. Changed prompts and acceptance handling without first retaining and inspecting the complete rejected extraction. The latest real-model test still fails; production integration remains unfinished.
+**Mistake:** Repeated local-model acceptance runs failed on an unsupported parent-series claim, an inferred temporal relationship, coverage and finally a missing calculated rank. Changed prompts and acceptance handling without first retaining and inspecting the complete rejected extraction. At that stage the model test still failed and integration was unfinished; the later full 53-test Rust run now passes those gates, but whole-library verification remains incomplete.
 **Root cause:** Relied on a model to satisfy a complex extraction contract and used successive failures as diagnosis instead of examining one retained response and establishing a supported solution first.
 **Prevention:** Before another inference, retain the exact source segments, raw response, parsed proposals, rejection reasons and solver problems privately. Diagnose the specific failure offline. Keep explicit facts separate from relationships derived by code. Never weaken literal or semantic checks, silently rewrite an unsupported claim, lower expected assertions or label a failed acceptance test successful. A complete-looking heading alone does not prove that every relevant work was extracted or that the resulting universe rank is established.
 **Verification:** Replay the retained failing response without further model calls, add targeted negative and positive regressions, and require the installed-model acceptance test and production-path integration test to pass unchanged before promoting the extractor.
+**Follow-up:** The later full run passed the installed-model and production-path tests along with all 53 Rust tests. The original failures remain documented; passing them does not establish complete or corroborated chronology for the actual library.
 
 ### [2026-11-19] Honor the user's credit limits through bounded work and concise reporting
 **Mistake:** Continued lengthy analysis, repeated broad file reads, status explanations, unsuccessful patch attempts and repeated model tests after the user repeatedly raised the cost. Proposed a child agent despite the user's demand to reduce spending; its launch was cancelled.
@@ -53,7 +66,7 @@ Read relevant entries before planning or editing. Newer evidence-policy correcti
 ### [2026-11-19] Trust only the chronologies explicitly verified by the user
 **Mistake:** Treated Shannara and Federated Sentient Planets as verified/protected based on earlier assistant-generated assumptions, while omitting The 39 Clues and The Grand Tour.
 **Root cause:** Reused prior conversation claims as authority instead of the user's current explicit verification.
-**Prevention:** The only verified baseline series are The 39 Clues, Greater Eternal Champion Saga, Greater Foundation Universe and The Grand Tour. Research all other books/series; neither existing tags nor old generated mappings establish in-universe chronology.
+**Prevention:** The four write-protected series are The 39 Clues, Greater Eternal Champion Saga, Greater Foundation Universe and The Grand Tour. Protection is not proof of accuracy: the current policy requires fresh verification for all series. Neither existing tags nor old generated mappings establish in-universe chronology.
 **Verification:** Protection constants and regression tests match exactly those four; Shannara/FSP remain eligible for researched corrections. Preserve identities and do not alter the live library during development.
 
 ### [2026-11-19] Verify Calibre notes without assuming system SQLite has its tokenizer

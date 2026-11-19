@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/wlfogle/calibre-curator",
+  "baseline_commit": "cde2c547d6870e4ba2f5ccf7b0925b02ff8b92c7",
+  "snapshot_includes_local_core_changes": true,
+  "original_sha256": {
+    "Cargo.toml": "558ca4f5f5bac9b3478aafe4fcf257b17668c83794f45fe3aed6229470824e8e",
+    "LICENSE": "1a2256cd33975f2ceee041626f645aefa8148de2af63b3a0cec3311f42f10667",
+    "src/ai.rs": "147317cd5fae0324b59048ad42a585f0fc6316cc4a14d4cccaedb42bcb81c8d1",
+    "src/ai_app.rs": "92a1eb7ffca4e7db41c4fc4dc1938024f92a3a3909adc0952c432f0f53c3f68e",
+    "src/app.rs": "719edbfc6a1544d342340746d0dac6ac87301fd7529424b8fdb904db6fdcec8f",
+    "src/bin/curator.rs": "d6283e263b224293649f170bde18258e18bb17d3ed0faf65d00571a9e4a20b69",
+    "src/chronology.rs": "07c022a880165a634648f18ec37bf6c20cbfbc3501f5e9e499697d897bc519b6",
+    "src/documents.rs": "60ddfc5de0848b634e693b5f617112e1e112529a251df0ce1d5f58bf9f6b4dc7",
+    "src/lib.rs": "3e852d1548ff2544557eeb192cf39a02aa047c2dd5bae2a0ff14231110bf5237",
+    "src/library.rs": "943c9440376481e3f06f76b2a5d90dd6a64f1aec7ea1c27243ffee16c36e68a2",
+    "src/matching.rs": "21ebff154273f7c24a3f7c918b2e1f826800ace5546b2a36ac03d1e3a126794b",
+    "src/metadata.rs": "f2c3bdb78446fe1294eb8547d31acae102346fc66be1f1077c83ee392c42481b",
+    "src/model.rs": "4dbf71e50ad8d98557d9b150339c9e1a3757110e5941420daa8ef2631c224323",
+    "src/repair.rs": "34bf264530e9c025718b3ff29a987ff1d0936e3522585811ee0d94e7a333b7c8",
+    "src/research.rs": "90a1a39cd5f67c0ebbf0f7c38d8e750fe886a94703bd516d585423bc951264a9",
+    "src/sources.rs": "3ebf8a9cdbc6c6131e42eb9c2266cb45c42da39f970012c016ef6307684a8526",
+    "src/store.rs": "c89ff7227ff2f7a7bdeee126a47d547d595811bc78555140ff3370ed37990e1a",
+    "src/synopsis.rs": "bf4c410e651fbaa9bc99e4632b8daeae9f45462a887b31d56f2ea9fce85565a1"
+  },
+  "manifest_adjustments": {
+    "version.workspace = true": "version = \"0.5.0\"",
+    "edition.workspace = true": "edition = \"2021\"",
+    "license.workspace = true": "license = \"MIT\""
+  },
+  "scope": "Core Rust source and MIT license. Upstream GUI integration tests/assets are not included; this project has its own native integration suite."
+}

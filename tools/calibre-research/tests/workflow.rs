@@ -132,27 +132,40 @@ b=sqlite3.connect(source/'metadata.db'); a.backup(b); b.close(); a.close()
         });
     }
     let chunks = facts::chunks(&page);
-    assert_eq!(chunks.len(), 1);
-    let chunk = facts::screen(
-        facts::Extraction {
-            facts: timeline::Facts {
-                works,
-                relations: vec![],
-            },
-            coverage: vec![],
-        },
-        &page,
-        &chunks[0],
-        "offline-source-fixture",
-    )
-    .unwrap();
+    let extracted = chunks
+        .iter()
+        .map(|input| {
+            let selected = works
+                .iter()
+                .filter(|work| {
+                    work.citations
+                        .iter()
+                        .all(|c| input.iter().any(|s| s.ordinal == c.segment))
+                })
+                .cloned()
+                .collect();
+            facts::screen(
+                facts::Extraction {
+                    facts: timeline::Facts {
+                        works: selected,
+                        relations: vec![],
+                    },
+                    coverage: vec![],
+                },
+                &page,
+                input,
+                "offline-source-fixture",
+            )
+            .unwrap()
+        })
+        .collect();
     let mut corpus = curation::Corpus::default();
     corpus.pages.insert(
         page.source.location.clone(),
         curation::Document {
             page,
-            processed: 1,
-            chunks: vec![chunk],
+            processed: chunks.len(),
+            chunks: extracted,
         },
     );
     app.store
@@ -230,6 +243,9 @@ b=sqlite3.connect(source/'metadata.db'); a.backup(b); b.close(); a.close()
     drop(app);
     // Full handoff to native Calibre, with field masks preserving unsupported levels.
     run_wrapper(&["--export-only", "--apply"]);
+    let applied: Value = serde_json::from_slice(&run_wrapper(&["--last-summary"]).stdout).unwrap();
+    assert_eq!(applied["apply_status"], "applied");
+    assert_eq!(applied["applied"], true);
     let mut app = App::open(&engine_workspace, Default::default()).unwrap();
     app.refresh().unwrap();
     let scan = app.scan.as_ref().unwrap();
@@ -259,4 +275,9 @@ b=sqlite3.connect(source/'metadata.db'); a.backup(b); b.close(); a.close()
         fs::read(root.join("source-library/metadata.db")).unwrap(),
         initial_source
     );
+    run_wrapper(&["--export-only", "--apply"]);
+    let repeated: Value = serde_json::from_slice(&run_wrapper(&["--last-summary"]).stdout).unwrap();
+    assert_eq!(repeated["apply_status"], "no_changes");
+    assert_eq!(repeated["applied"], false);
+    assert_eq!(repeated["proposed_changes"], 0);
 }

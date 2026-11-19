@@ -142,6 +142,11 @@ If a started run lacks `verified.json`, stop and review it before any further ap
 The tool verifies series assignments, identities and counts, not book-file integrity or historical chronology. Its numeric/source validation cannot replace research.
 
 ## Tests and repeatable benchmark
+### Self-contained build
+The exact required MIT-licensed core is included in `vendor/curator-core`, with its license and original source hashes in `UPSTREAM.json`. The adapter no longer uses a sibling path dependency. The wrapper builds with `--locked --offline`, defaults to this repository's `target/`, and respects `CARGO_TARGET_DIR` while refusing build caches inside Calibre libraries. Upstream GUI integration assets are not needed by this application.
+
+Post-vendoring full validation on 2026-11-19 passed all 53 Rust tests with opt-in gates explicitly enabled, and all 74 Python tests under isolated Calibre Python, including the six native API cases. Existing libraries were not updated. These test results do not replace complete bibliography/per-series membership verification or independent source corroboration.
+
 ### Automatic wrapper: reviewed safety and audit behavior
 `scripts/calibre_auto_curate.py` uses the `nexus-facts-batch-v2` production export. The executable now calls the shared facts/chronology path; this does not mean the whole library is verified. The actual binary-to-wrapper-to-native-Calibre fixture test has passed with independently checked main plus all three sub-series fields, source-tampering refusal and unchanged protected/source records.
 
@@ -160,6 +165,20 @@ python3 scripts/calibre_auto_curate.py --summary JOB_ID
 ```
 `--last-summary` selects the latest completed sequenced job. Inspect legacy jobs by their explicit ID. Inspection may read private reports but never applies metadata.
 
+New workflow summaries expose `apply_status`, serialized from the string-valued `ApplyStatus` enum:
+- `dry_run_only`: `--apply` was not requested. Inspect `validation_errors` separately; this status does not imply a clean audit.
+- `applied`: the guarded native subprocess completed successfully, including its verification.
+- `blocked_by_errors`: apply was requested but the audit found blocking errors; no native apply was invoked.
+- `no_changes`: apply was requested, the audit was clean, and metadata already matched the verified assignments.
+- `no_verified_mapping`: apply was requested but there were no source-validated mapping rows.
+- `skipped_no_selection`: an exception retry matched no books; no engine/job/apply was started. This result is printed rather than creating an empty job directory.
+- `failed`: apply preparation or native invocation raised an error. Its summary is retained with `apply_error`; the command still exits unsuccessfully.
+
+The compatibility `applied` boolean remains true only for `applied`. For `failed`, `apply_attempted` distinguishes failure before native invocation from a native attempt. If a native attempt occurred, false `applied` is **not proof of unchanged metadata**: inspect `apply.json` and the importer recovery journal before any retry. No rollback or automatic retry is implied. Unexpected termination can still leave a partial job without a summary. Older summaries without `apply_status` remain readable and are not rewritten; unknown explicit status values are refused.
+
+Final author-boundary verification on 2026-11-19: all 50 default Rust tests passed, with 3 opt-in model/live tests skipped. The updated Python suite ran 72 tests with 6 native-runtime skips. The guarded native temporary-library workflow additionally verified `applied` followed by an idempotent `no_changes` report. No existing-library or online/model research run was required for these checks.
+The pre-vendoring full validation passed all **53 Rust tests with no skips** and all **72 tests under isolated Calibre Python**. The post-vendoring run above retains those Rust results and adds two passing build-configuration regressions, bringing the Python suite to 74. Formatting, Python compilation and whitespace checks passed; Clippy reported unused-code/style warnings. The external dependency blocker is resolved, but per-series completeness and source corroboration remain unfinished.
+
 The reported `Less than 21 GiB free` refusal is a storage preflight, not a research result. A read-only research run may use a separate filesystem with sufficient workspace reserve through `--workspace`; every apply still checks the unchanged 21 GiB reserve on the library filesystem as well. No files are deleted and no reserve is lowered automatically.
 
 ### Nested series data structure
@@ -173,8 +192,7 @@ The user's verified **Greater Eternal Champion Saga is the structural and in-uni
 Both paths extract cited dates and memberships at runtime, solve the three-work chronology, generate three mappings and verify native Calibre updates. Missing/ambiguous/unavailable evidence fails the acceptance test rather than substituting recorded success. Discovery failures retain a private `automatic_retry` receipt, not a manual-review request; this receipt is not yet integrated into the production scheduler.
 
 ```fish
-env CARGO_TARGET_DIR=/media/loufogle/Data/Repos/calibre-curator/target \
-  cargo test --offline --manifest-path tools/calibre-research/Cargo.toml \
+cargo test --locked --offline --manifest-path tools/calibre-research/Cargo.toml \
   --test live_book -- --ignored --nocapture
 ```
 

@@ -373,10 +373,8 @@ fn process(request: &Request) -> Result<PathBuf> {
                 .cached_value::<curation::Corpus>(curation::CORPUS_KEY)?
                 .unwrap_or_default();
             match curation::calculate(book, &corpus) {
-                Ok(mut run) => {
-                    run.queries = old.queries.clone();
-                    run.model = old.model.clone();
-                    run.digest = old.digest.clone();
+                Ok(run) => {
+                    let run = curation::preserve_research_context(old, run);
                     saved.status = run.status.clone();
                     saved.run = Some(run);
                     saved.book = book.clone();
