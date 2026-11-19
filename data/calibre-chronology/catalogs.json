@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "policy": "Whole-book placement follows the named specialist chronology; global positions retain unowned works. Time-travel conflicts and multi-era collections without a clear whole-book placement are held. Sub-series indices follow chronology, not publication numbering.",
+  "catalogs": [
+    {
+      "universe": "Kurtherian Gambit Universe",
+      "file": "kurtherian.tsv",
+      "context_hints": ["kurtherian", "vigilante chronicles", "superdreadnought", "frank kurns", "second dark ages", "wellspring knight"],
+      "author_hints": ["anderle", "natalie grey", "ell leigh clarke"],
+      "relative_timeline": true,
+      "sources": [
+        "https://lmbpn.com/the-kurtherian-gambit-timeline/",
+        "https://lmbpn.com/age-of-expansion-endgame-timeline/",
+        "https://lmbpn.com/age-of-magic-timeline/",
+        "https://lmbpn.com/books-in-the-kurtherian-gambit-universe/",
+        "https://lmbpn.com/ma-books/"
+      ],
+      "limitations": "Publisher timeline diagrams establish epochs, interleaving anchors and concurrent branches, not exact dates for every book. Within concurrent branches this catalog is an explicitly curated linear extension, preserving series sequence; integer positions are display ranks, not fictional dates. Age of Magic begins at WWDE+235. Boxed sets, multiverse anthologies and uncited crossover positions remain held. This catalog is incomplete, not an exhaustive universe bibliography."
+    },
+    {
+      "universe": "Dragonlance Universe",
+      "file": "dragonlance.tsv",
+      "context_hints": ["dragonlance"],
+      "sources": [
+        "https://dragonlancenexus.com/chronological-product-list/",
+        "https://dragonlancenexus.com/complete-product-list/",
+        "https://dragonlancelibrary.com/series-order/"
+      ],
+      "limitations": "Specialist list is archived and incomplete. It cites Dragon Magazine #224 as its original basis. Its chronology is used rather than publication/recommended reading order. Legends time travel is held instead of silently placing War of the Twins before Time of the Twins."
+    },
+    {
+      "universe": "Known Space Universe",
+      "file": "known-space.tsv",
+      "context_hints": ["known space", "ringworld", "man kzin", "fleet of worlds"],
+      "author_hints": ["niven"],
+      "sources": [
+        "https://larryniven.net/?q=lensmans-known-space-chronology",
+        "https://news.larryniven.net/concordance/content.asp?ovr=t&page=TableOfContents",
+        "https://blog.edwardmlerner.com/2011/02/of-fleet-fleets-and-known-space.html"
+      ],
+      "limitations": "Lensman's chronology gives approximate and disputed dates. The coauthor independently establishes the Fleet/Ringworld relationship. Anthology volumes and unestablished Man-Kzin continuity are not arbitrarily numbered. Telepath's Dance has conflicting author metadata in the original export and is held."
+    }
+  ]
+}

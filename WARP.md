@@ -1,0 +1,12 @@
+# Calibre curation working rules
+- Read `MISTAKES.md` before planning or editing. Keep work bounded and reports concise.
+- The goal is independently verified in-universe placement, not publication order, old indices or a successful importer demonstration.
+- Support main `series` plus `#series2`, `#series3`, `#series4`, each with its own index. Preserve nested and overlapping memberships.
+- Old research, catalogs and metadata are leads only. The four write-protected series are not exempt from fresh verification.
+- Never apply to the original library. Existing-library writes target only the verified duplicate with its receipt, rehearsal, backup, locks and readback intact.
+- Never close Calibre automatically, weaken a writer/storage guard, delete libraries or alter ebook files.
+- Retain exact rejected extraction inputs/output privately; diagnose offline before another model/network call. Do not guess prompts repeatedly.
+- No extra agents, paid research APIs, model downloads or benchmarks without explicit authorization.
+- Default tests are offline. Live HTTP/model tests require explicit opt-in.
+- Do not commit or push unless explicitly requested.
+- This repository depends on sibling `../calibre-curator/crates/curator-core`; it does not depend on `nexus-mediastack`.

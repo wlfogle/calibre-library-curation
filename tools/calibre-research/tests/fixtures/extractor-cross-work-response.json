@@ -1,0 +1,27 @@
+{
+  "source": {
+    "id": "039fb2e3-4a52-4c8f-8c37-1ee24e3d6d59",
+    "kind": "web-research",
+    "location": "https://example.org/chronology",
+    "name": "https://example.org/chronology",
+    "segments": [
+      {
+        "kind": "h1",
+        "ordinal": 1,
+        "text": "Complete chronology of New Universe"
+      },
+      {
+        "kind": "p",
+        "ordinal": 2,
+        "text": "New Work by New Writer in New Universe is set in 100 AD. New Work is Small Arc book 1."
+      },
+      {
+        "kind": "p",
+        "ordinal": 3,
+        "text": "Later Work by New Writer in New Universe is set in 200 AD. Later Work is Small Arc book 2."
+      }
+    ],
+    "sha256": "34d2f1f23a25946d6012580a92b739c44a37333c840e3efce54f6cea5a3dc7ce"
+  },
+  "content": "{\"coverage\":[{\"citations\":[{\"quote\":\"Complete chronology of New Universe\",\"segment\":1},{\"quote\":\"New Work by New Writer in New Universe is set in 100 AD. New Work is Small Arc book 1.\",\"segment\":2},{\"quote\":\"Later Work by New Writer in New Universe is set in 200 AD. Later Work is Small Arc book 2.\",\"segment\":3}],\"complete\":false,\"universe\":\"New Universe\"}],\"facts\":{\"relations\":[{\"after\":\"New Work\",\"basis\":\"story_time\",\"before\":\"Later Work\",\"citations\":[{\"quote\":\"New Work by New Writer in New Universe is set in 100 AD. New Work is Small Arc book 1.\",\"segment\":2},{\"quote\":\"Later Work by New Writer in New Universe is set in 200 AD. Later Work is Small Arc book 2.\",\"segment\":3}],\"universe\":\"New Universe\"},{\"after\":\"New Work\",\"basis\":\"publication\",\"before\":\"Later Work\",\"citations\":[{\"quote\":\"New Work by New Writer in New Universe is set in 100 AD. New Work is Small Arc book 1.\",\"segment\":2},{\"quote\":\"Later Work by New Writer in New Universe is set in 200 AD. Later Work is Small Arc book 2.\",\"segment\":3}],\"universe\":\"New Universe\"}],\"works\":[{\"authors\":[\"New Writer\"],\"citations\":[{\"quote\":\"New Work by New Writer in New Universe is set in 100 AD. New Work is Small Arc book 1.\",\"segment\":2},{\"quote\":\"Complete chronology of New Universe\",\"segment\":1}],\"contains\":[],\"memberships\":[{\"citations\":[{\"quote\":\"New Work by New Writer in New Universe is set in 100 AD. New Work is Small Arc book 1.\",\"segment\":2}],\"name\":\"Small Arc\",\"parent\":\"New Universe\",\"published_number\":1}],\"settings\":[{\"calendar\":\"AD\",\"citations\":[{\"quote\":\"New Work by New Writer in New Universe is set in 100 AD. New Work is Small Arc book 1.\",\"segment\":2}],\"literal\":\"100 AD\",\"role\":\"principal\"},{\"calendar\":\"AD\",\"citations\":[{\"quote\":\"Later Work by New Writer in New Universe is set in 200 AD. Later Work is Small Arc book 2.\",\"segment\":3}],\"literal\":\"200 AD\",\"role\":\"principal\"}],\"standalone\":false,\"title\":\"New Work\",\"universe\":\"New Universe\"},{\"authors\":[\"New Writer\"],\"citations\":[{\"quote\":\"Later Work by New Writer in New Universe is set in 200 AD. Later Work is Small Arc book 2.\",\"segment\":3},{\"quote\":\"Complete chronology of New Universe\",\"segment\":1}],\"contains\":[],\"memberships\":[{\"citations\":[{\"quote\":\"Later Work by New Writer in New Universe is set in 200 AD. Later Work is Small Arc book 2.\",\"segment\":3}],\"name\":\"Small Arc\",\"parent\":\"New Universe\",\"published_number\":2}],\"settings\":[{\"calendar\":\"AD\",\"citations\":[{\"quote\":\"Later Work by New Writer in New Universe is set in 200 AD. Later Work is Small Arc book 2.\",\"segment\":3}],\"literal\":\"200 AD\",\"role\":\"principal\"}],\"standalone\":false,\"title\":\"Later Work\",\"universe\":\"New Universe\"}]}\n}"
+}

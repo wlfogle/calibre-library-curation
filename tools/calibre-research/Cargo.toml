@@ -1,0 +1,16 @@
+[package]
+name = "nexus-calibre-research"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+curator-core = { path = "../../../calibre-curator/crates/curator-core" }
+libc = "0.2"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
