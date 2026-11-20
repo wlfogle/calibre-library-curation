@@ -18,6 +18,17 @@ Fetch failures also allow discovery on the next run instead of trapping research
 in a permanently failing saved queue.
 
 ## Deployment readiness
+The subsequent authorized one-book live acceptance **failed**: full search was
+blocked and returned leads did not establish the target work. Four extraction
+calls had been spent on an unrelated page, with the last response truncated.
+Source selection now checks work/author or an already verified universe before
+inference; the bounded follow-up made zero further extraction calls. Stored
+series names are discovery hints only. This prevents demonstrated waste but does
+not resolve search availability or establish a verified chronology.
+After this correction, 73 default Rust tests passed (3 live opt-ins skipped),
+including the production temporary-library workflow. Formatting and whitespace
+checks passed; Clippy completed with warnings, without errors.
+
 The full authorized validation run on 2026-11-19 passed:
 - All 53 Rust tests, including the three opt-in public-HTTP/local-model tests.
 - All 74 Python tests under Calibre Python, including all six native API tests.

@@ -515,6 +515,94 @@ fn failed_fetch_discovery_flag_survives_without_discarding_pending_sources() {
 }
 
 #[test]
+fn unrelated_common_title_pages_never_reach_cached_extraction() {
+    let (mut book, _) = fixture();
+    book.title = "Sentinel".into();
+    book.authors = vec!["Natalie Grey".into()];
+    book.hierarchy[0] = SeriesValue {
+        name: Some("Transformers".into()),
+        index: Some(126.0),
+    };
+    let page = curator_core::chronology::parse_page(
+        b"<h1>Sentinel Prime</h1><p>Sentinel Prime is a character in Transformers.</p>",
+        "https://example.org/sentinel-prime",
+    )
+    .unwrap();
+    assert!(!curation::relevant_page(&book, &page, &Default::default()));
+    let url = page.source.location.clone();
+    let mut corpus = curation::Corpus::default();
+    corpus.pages.insert(
+        url.clone(),
+        curation::Document {
+            page,
+            processed: 0,
+            chunks: vec![],
+        },
+    );
+    assert!(curation::source_frontier(&book, &corpus, &[url], false)
+        .unwrap()
+        .is_empty());
+    let progress = curation::resume_cached_sources(&book, &mut corpus, 2, 4, |_, _| {
+        panic!("An unrelated source must not consume model calls")
+    })
+    .unwrap();
+    assert_eq!(progress.calls, 0);
+    assert_eq!(
+        curation::calculate(&book, &corpus).unwrap().field_mask,
+        [false; 4]
+    );
+}
+
+#[test]
+fn target_identity_or_verified_universe_makes_a_page_a_research_candidate() {
+    let (book, _) = fixture();
+    for (html, accepted) in [
+        ("<p>New Work by Other Writer.</p>", false),
+        ("<p>New Work by New Writer.</p>", true),
+    ] {
+        let page =
+            curator_core::chronology::parse_page(html.as_bytes(), "https://example.org/book")
+                .unwrap();
+        assert_eq!(
+            curation::relevant_page(&book, &page, &Default::default()),
+            accepted
+        );
+    }
+    let page = curator_core::chronology::parse_page(
+        b"<h1>Complete bibliography of New Universe</h1><p>Unowned works follow.</p>",
+        "https://example.org/universe",
+    )
+    .unwrap();
+    assert!(!curation::relevant_page(&book, &page, &Default::default()));
+    assert!(curation::relevant_page(
+        &book,
+        &page,
+        &["New Universe".into()].into_iter().collect()
+    ));
+}
+
+#[test]
+fn stored_series_can_disambiguate_a_query_but_cannot_verify_a_mapping() {
+    let (mut book, _) = fixture();
+    book.hierarchy[0] = SeriesValue {
+        name: Some("Old Universe".into()),
+        index: Some(126.0),
+    };
+    book.hierarchy[1] = SeriesValue {
+        name: Some("Candidate Arc".into()),
+        index: Some(27.0),
+    };
+    assert_eq!(
+        curation::identity_query_hint(&book),
+        "\"New Work\" New Writer Candidate Arc"
+    );
+    let result = curation::calculate(&book, &curation::Corpus::default()).unwrap();
+    assert_eq!(result.status, "research_pending");
+    assert_eq!(result.field_mask, [false; 4]);
+    assert_eq!(result.hierarchy, book.hierarchy);
+}
+
+#[test]
 fn actual_local_output_produces_cited_chronology_from_shared_profile() {
     let (book, corpus) = fixture();
     let result = curation::calculate(&book, &corpus).unwrap();

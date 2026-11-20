@@ -250,6 +250,44 @@ fn known_universes(book: &Book, corpus: &Corpus) -> BTreeSet<String> {
         .collect()
 }
 
+pub fn relevant_page(book: &Book, page: &Page, universes: &BTreeSet<String>) -> bool {
+    let text = page
+        .source
+        .segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lower = text.to_lowercase();
+    universes
+        .iter()
+        .any(|u| !u.is_empty() && lower.contains(&u.to_lowercase()))
+        || (!book.title.trim().is_empty()
+            && lower.contains(&book.title.to_lowercase())
+            && book
+                .authors
+                .iter()
+                .any(|a| timeline::author_cited(&text, a)))
+}
+
+pub fn identity_query_hint(book: &Book) -> String {
+    let series = book
+        .hierarchy
+        .iter()
+        .rev()
+        .filter_map(|s| s.name.as_deref())
+        .find(|s| !s.trim().is_empty());
+    let identity = format!(
+        "\"{}\" {}",
+        book.title,
+        book.authors.first().map(String::as_str).unwrap_or("")
+    );
+    match series {
+        Some(series) => format!("{identity} {series}"),
+        None => identity,
+    }
+}
+
 /// Schedule existing, unfinished source snapshots before spending discovery requests.
 pub fn cached_document_urls(book: &Book, corpus: &Corpus) -> Result<Vec<String>> {
     let missing = calculate(book, corpus)?
@@ -257,14 +295,13 @@ pub fn cached_document_urls(book: &Book, corpus: &Corpus) -> Result<Vec<String>>
         .iter()
         .map(|s| normalize(s))
         .collect::<BTreeSet<_>>();
-    let universes = known_universes(book, corpus)
-        .iter()
-        .map(|u| normalize(u))
-        .collect::<BTreeSet<_>>();
+    let known = known_universes(book, corpus);
+    let universes = known.iter().map(|u| normalize(u)).collect::<BTreeSet<_>>();
     let title = book.title.to_lowercase();
     let mut pending = Vec::new();
     for (url, document) in &corpus.pages {
         if !facts::fresh(document.page.fetched_at)
+            || !relevant_page(book, &document.page, &known)
             || pending_chunk_indices(document, book)?.is_empty()
         {
             continue;
@@ -373,6 +410,7 @@ pub fn source_frontier(
     urls: &[String],
     refresh: bool,
 ) -> Result<Vec<String>> {
+    let universes = known_universes(book, corpus);
     let mut queue = VecDeque::from(urls.to_vec());
     let mut seen = BTreeSet::new();
     let mut pending = Vec::new();
@@ -390,6 +428,9 @@ pub fn source_frontier(
             .get(&url)
             .filter(|d| !refresh && facts::fresh(d.page.fetched_at))
         {
+            if !relevant_page(book, &document.page, &universes) {
+                continue;
+            }
             if document.processed == facts::chunks(&document.page).len()
                 && pending_chunk_indices(document, book)?.is_empty()
             {
@@ -756,6 +797,7 @@ pub fn research_book(
         .find(|m| m.name == app.data.ai_settings.model && m.usable)
         .context("Installed local extraction model is unavailable")?;
     let author = book.authors.first().context("Writing author is missing")?;
+    let identity_hint = identity_query_hint(book);
     let CachedProgress {
         pages: cached_pages,
         calls: cached_calls,
@@ -819,14 +861,8 @@ pub fn research_book(
             format!("{universe} fictional timeline chronological order"),
         ],
         None => vec![
-            format!(
-                "\"{}\" {} in-universe chronology series",
-                book.title, author
-            ),
-            format!(
-                "\"{}\" {} universe series chronology bibliography",
-                book.title, author
-            ),
+            format!("{identity_hint} in-universe chronology series"),
+            format!("{identity_hint} universe series chronology bibliography"),
         ],
     };
     if investigation.successful_queries.len() >= 2 {
@@ -836,11 +872,8 @@ pub fn research_book(
                 format!("{universe} specialist fictional dates chronological bibliography"),
             ],
             None => vec![
-                format!("\"{}\" {} official publisher series", book.title, author),
-                format!(
-                    "\"{}\" {} story setting fictional chronology",
-                    book.title, author
-                ),
+                format!("{identity_hint} official publisher series"),
+                format!("{identity_hint} story setting fictional chronology"),
             ],
         };
     }
@@ -941,6 +974,20 @@ pub fn research_book(
         } else {
             document.page = page.clone();
         }
+        if !relevant_page(book, &page, &known_universes(book, &corpus)) {
+            investigation.pending_urls.retain(|u| u != &url);
+            investigation.completed_urls.insert(url.clone());
+            corpus
+                .investigations
+                .insert(investigation_key.clone(), investigation.clone());
+            app.store.cache_value(CORPUS_KEY, &corpus)?;
+            notes.push(format!("{url}: unrelated to the target work/author or verified universe; no extraction performed"));
+            continue;
+        }
+        let document = corpus
+            .pages
+            .get_mut(&url)
+            .context("Retained source disappeared")?;
         let mut extraction_failed = false;
         for input_index in pending_chunk_indices(document, book)? {
             if calls >= extraction_budget {

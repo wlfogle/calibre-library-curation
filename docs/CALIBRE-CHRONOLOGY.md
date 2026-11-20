@@ -148,6 +148,26 @@ The exact required MIT-licensed core is included in `vendor/curator-core`, with 
 Post-vendoring full validation on 2026-11-19 passed all 53 Rust tests with opt-in gates explicitly enabled, and all 74 Python tests under isolated Calibre Python, including the six native API cases. Existing libraries were not updated. These test results do not replace complete bibliography/per-series membership verification or independent source corroboration.
 
 ### Automatic wrapper: reviewed safety and audit behavior
+The subsequent explicitly authorized real-book probe did not pass live acceptance.
+Full search remained blocked; source acquisition returned unrelated material or
+HTTP failures. Four extraction attempts were retained from an unrelated page;
+the last stopped at the existing 2,048-token output cap. The cap, model and
+evidence validators were not relaxed. New and cached pages now require a matching
+title/author or a universe already established by cited facts before inference.
+Stored series names may disambiguate discovery queries but cannot authorize a
+mapping. Offline regressions cover the common-title failure and unchanged
+unsupported metadata.
+
+The bounded follow-up made zero new extraction calls and still produced zero
+validated mappings. Across the authorized probe there were four source-page
+attempts and two additional discovery/catalogue probes, with four extraction calls
+against limits of six pages and eight calls. Both existing library database
+hashes remained unchanged. The exact diagnostics and failed live-acceptance report
+remain private; this failure is not evidence of a deployment-ready curator.
+The source-selection correction passed all 73 default Rust tests with 3 live
+opt-ins skipped, including the normal research/apply workflow. Formatting and
+whitespace checks passed; Clippy completed with warnings, without errors.
+
 Actual-library verification on 2026-11-20 scanned all 8,524 duplicate-library
 records. Both original and duplicate metadata databases passed full SQLite
 integrity checks; UUID uniqueness/validity, finite indices, baseline identity and
