@@ -1,3 +1,108 @@
+#[test]
+fn universe_completeness_does_not_verify_an_independent_subseries_number() {
+    let (book, mut corpus) = fixture();
+    corpus.pages.remove("https://scope.example/small-arc");
+    let incomplete = curation::calculate(&book, &corpus).unwrap();
+    assert_eq!(incomplete.status, "research_pending");
+    assert_eq!(incomplete.field_mask, [false; 4]);
+    assert_eq!(incomplete.missing_scopes, vec!["Small Arc".to_string()]);
+    assert!(incomplete
+        .notes
+        .iter()
+        .any(|n| n.contains("Independent Small Arc membership coverage")));
+}
+
+#[test]
+fn extracted_title_without_scoped_membership_cannot_complete_a_subseries() {
+    let (book, mut corpus) = fixture();
+    let document = corpus
+        .pages
+        .get_mut("https://scope.example/small-arc")
+        .unwrap();
+    for chunk in &mut document.chunks {
+        for work in &mut chunk.evidence.facts.works {
+            if work.title == "Later Work" {
+                work.memberships.clear();
+            }
+        }
+    }
+    let result = curation::calculate(&book, &corpus).unwrap();
+    assert_eq!(result.status, "research_pending");
+    assert_eq!(result.field_mask, [false; 4]);
+    assert_eq!(result.missing_scopes, vec!["Small Arc"]);
+}
+
+#[test]
+fn same_named_series_in_another_universe_cannot_supply_completeness() {
+    let (book, mut corpus) = fixture();
+    let url = "https://scope.example/small-arc";
+    let mut foreign_works = corpus.pages[url]
+        .chunks
+        .iter()
+        .flat_map(|c| c.evidence.facts.works.iter().cloned())
+        .collect::<Vec<_>>();
+    for work in &mut foreign_works {
+        work.title = format!("Unrelated {}", work.title);
+        work.authors = vec!["Other Writer".into()];
+        work.universe = Some("Unrelated Universe".into());
+    }
+    corpus.pages.insert(
+        url.into(),
+        bibliography::series_document("Small Arc", &foreign_works, url),
+    );
+    let result = curation::calculate(&book, &corpus).unwrap();
+    assert_eq!(result.status, "research_pending");
+    assert_eq!(result.field_mask, [false; 4]);
+    assert_eq!(result.missing_scopes, vec!["Small Arc"]);
+}
+
+#[test]
+fn omitted_work_in_subseries_source_cannot_borrow_complete_universe_membership() {
+    let (book, mut corpus) = fixture();
+    let document = corpus
+        .pages
+        .get_mut("https://scope.example/small-arc")
+        .unwrap();
+    for chunk in &mut document.chunks {
+        chunk
+            .evidence
+            .facts
+            .works
+            .retain(|w| w.title != "Later Work");
+    }
+    let result = curation::calculate(&book, &corpus).unwrap();
+    assert_eq!(result.status, "research_pending");
+    assert_eq!(result.field_mask, [false; 4]);
+    assert_eq!(result.missing_scopes, vec!["Small Arc"]);
+}
+
+#[test]
+fn complete_subseries_scope_requires_every_source_entry_and_enables_independent_index() {
+    let (book, corpus) = fixture();
+    assert!(corpus.pages["https://scope.example/small-arc"]
+        .chunks
+        .iter()
+        .flat_map(|c| &c.coverage)
+        .any(|c| c.universe == "Small Arc" && c.complete));
+    let ready = curation::calculate(&book, &corpus).unwrap();
+    assert_eq!(ready.status, "ready");
+    assert!(ready.missing_scopes.is_empty());
+    assert_eq!(ready.hierarchy[1].name.as_deref(), Some("Small Arc"));
+    assert_eq!(ready.hierarchy[1].index, Some(1.0));
+    let mut partial = corpus.clone();
+    partial.pages.values_mut().next().unwrap().chunks[0]
+        .evidence
+        .facts
+        .works
+        .retain(|w| w.title == "New Work");
+    assert_eq!(
+        curation::calculate(&book, &partial).unwrap().field_mask,
+        [false; 4]
+    );
+}
+
+#[path = "support/bibliography.rs"]
+mod bibliography;
 #[path = "../src/curation.rs"]
 mod curation;
 #[path = "../src/facts.rs"]
@@ -47,6 +152,16 @@ fn fixture() -> (Book, curation::Corpus) {
             processed: 1,
             chunks: vec![chunk],
         },
+    );
+    let works = corpus
+        .pages
+        .values()
+        .flat_map(|d| &d.chunks)
+        .flat_map(|c| c.evidence.facts.works.iter().cloned())
+        .collect::<Vec<_>>();
+    corpus.pages.insert(
+        "https://scope.example/small-arc".into(),
+        bibliography::series_document("Small Arc", &works, "https://scope.example/small-arc"),
     );
     (book, corpus)
 }

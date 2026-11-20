@@ -22,6 +22,28 @@ fn book() -> Book {
 }
 
 #[test]
+fn prose_declaration_cannot_impersonate_a_complete_bibliography_heading() {
+    let mut changed = chunk();
+    changed.evidence.source.segments[0].kind = "p".into();
+    changed.segments_hash =
+        sources::hash(&serde_json::to_vec(&changed.evidence.source.segments).unwrap());
+    assert!(facts::validate(&changed).is_err());
+}
+
+#[test]
+fn complete_bibliography_declarations_are_bound_to_the_exact_scope() {
+    let mut changed = chunk();
+    changed.evidence.source.segments[0].text = "Complete bibliography of Small Arc".into();
+    changed.coverage[0].citations[0].quote = "Complete bibliography of Small Arc".into();
+    changed.segments_hash =
+        sources::hash(&serde_json::to_vec(&changed.evidence.source.segments).unwrap());
+    // A complete sub-series bibliography is not a complete universe bibliography.
+    assert!(facts::validate(&changed).is_err());
+    changed.coverage[0].universe = "Small Arc".into();
+    facts::validate(&changed).unwrap();
+}
+
+#[test]
 fn retained_proposal_is_replayed_without_repeating_model_inference() {
     use curator_core::ai::{AiModel, AiSettings, Ollama};
     let root = tempfile::tempdir().unwrap();

@@ -182,6 +182,37 @@ The pre-vendoring full validation passed all **53 Rust tests with no skips** and
 The reported `Less than 21 GiB free` refusal is a storage preflight, not a research result. A read-only research run may use a separate filesystem with sufficient workspace reserve through `--workspace`; every apply still checks the unchanged 21 GiB reserve on the library filesystem as well. No files are deleted and no reserve is lowered automatically.
 
 ### Nested series data structure
+The production calculator now requires an explicit, cited complete bibliography
+or chronology heading for the universe and independently for every displayed
+sub-series. A universe-wide bibliography alone does not verify sub-series ranks.
+Recognized bibliography entries must each have a validated work identity and
+membership in the claimed scope within that document. An omitted entry or an
+extracted title with missing scoped membership leaves the mapping
+`research_pending`, with all four export flags false. Completeness is keyed by
+both universe and scope; a same-named series in another universe cannot satisfy it.
+`missing_scopes` is retained in the research result, and subsequent bounded
+research targets the first missing scope rather than repeating a generic book query.
+
+This is a conservative gate, not a general bibliography parser or independent
+corroboration. Entry accounting currently recognizes table rows, ordered-list
+entries and prose paragraphs containing ` by `. It can refuse valid pages in other
+formats, and cannot prove completeness of arbitrary prose or the truth of a site's
+claim. Whole-library completeness and independent source corroboration are still
+unfinished. The extraction policy is versioned as `cited-temporal-facts-v7`;
+older chunk plans are archived and re-screened through the existing migration
+path, retaining raw model proposals for replay rather than trusting old approvals.
+Offline regressions cover missing memberships, omitted entries, universe/scope
+collisions, prose impersonating headings, and all three independent sub-series
+gates in the guarded temporary-library production workflow. The latest default
+Rust suite passed; live HTTP/model gates were not enabled.
+
+Bibliography verification on 2026-11-20: 57 default Rust tests passed with 3
+HTTP/model opt-ins skipped. All 74 Python tests passed under a temporary isolated
+Calibre configuration, including all six native API cases. The separate
+system-Python command and format/lint/syntax-check batch were cancelled; neither
+is reported as a fresh pass. The initial diff whitespace check passed. No existing
+library was modified; the native workflow and API tests used temporary fixtures.
+
 `timeline::SeriesHierarchy` stores a series name, the book's independent optional index, and recursive `subseries`. Calculated placements include this tree alongside the compatibility membership list. Parent links preserve Forgotten Realms → The Legend of Drizzt → Icewind Dale; parallel branches and deeper nesting are supported. Unknown positions stay null. Unknown parents, cycles and conflicting parents/indices are rejected. Offline tests cover that three-level example, JSON round-trip, multiple branches, deeper nesting and the solver's nested output. This data structure does not establish new bibliographic facts or complete production research integration.
 The user's verified **Greater Eternal Champion Saga is the structural and in-universe chronological reference**, not a publication-order template. Read-only inspection confirmed 94 protected books. A regression retains the actual independent assignments for Dreamthief's Daughter (saga 97 / Elric 10 / The Moonbeam Roads 1), The Skrayling Tree (98 / 11 / 2), and The White Wolf's Son (saga 99 / The Moonbeam Roads 3 / Oona Von Bek 3). The hierarchy does not copy a parent index into a child or renumber these protected books.
 

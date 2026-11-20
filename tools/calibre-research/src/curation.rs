@@ -31,7 +31,9 @@ pub struct Investigation {
     pub completed_urls: BTreeSet<String>,
 }
 
-fn bibliography_accounted_for(document: &Document) -> bool {
+fn bibliography_accounted_for(document: &Document, scope: &str, universe: &str) -> bool {
+    let scope = normalize(scope);
+    let universe = normalize(universe);
     let works = document
         .chunks
         .iter()
@@ -58,7 +60,11 @@ fn bibliography_accounted_for(document: &Document) -> bool {
         }
         entries += 1;
         if !works.iter().any(|w| {
-            normalize(&segment.text).contains(&normalize(&w.title))
+            w.universe
+                .as_ref()
+                .is_some_and(|u| normalize(u) == universe)
+                && (universe == scope || w.memberships.iter().any(|m| normalize(&m.name) == scope))
+                && normalize(&segment.text).contains(&normalize(&w.title))
                 && w.citations.iter().any(|c| {
                     c.segment == segment.ordinal
                         && normalize(&c.quote).contains(&normalize(&w.title))
@@ -186,6 +192,8 @@ pub struct Run {
     pub model: String,
     pub digest: String,
     pub version: String,
+    #[serde(default)]
+    pub missing_scopes: Vec<String>,
 }
 
 pub fn preserve_research_context(previous: &Run, mut recalculated: Run) -> Run {
@@ -231,6 +239,7 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
         model: String::new(),
         digest: String::new(),
         version: VERSION.into(),
+        missing_scopes: vec![],
     };
     let mut chunks = Vec::new();
     let mut complete = BTreeSet::new();
@@ -270,13 +279,21 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
             {
                 bail!("Extraction does not cover its recorded source chunk");
             }
-            if document.processed == total
-                && document.chunks.len() == total
-                && bibliography_accounted_for(document)
-            {
+            if document.processed == total && document.chunks.len() == total {
                 for coverage in &chunk.coverage {
                     if coverage.complete {
-                        complete.insert(normalize(&coverage.universe));
+                        let universes = document
+                            .chunks
+                            .iter()
+                            .flat_map(|c| &c.evidence.facts.works)
+                            .filter_map(|w| w.universe.as_deref())
+                            .collect::<BTreeSet<_>>();
+                        for universe in universes {
+                            if bibliography_accounted_for(document, &coverage.universe, universe) {
+                                complete
+                                    .insert((normalize(universe), normalize(&coverage.universe)));
+                            }
+                        }
                     }
                 }
             }
@@ -336,7 +353,8 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
         })
         .collect::<Vec<_>>();
     run.evidence = selected.iter().map(|c| proof(c)).collect();
-    if !complete.contains(&normalize(universe)) {
+    if !complete.contains(&(normalize(universe), normalize(universe))) {
+        run.missing_scopes.push(universe.clone());
         run.notes.push(format!("Complete {universe} bibliography coverage has not been verified; subset ranks cannot be exported"));
         return Ok(run);
     }
@@ -410,6 +428,17 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
     }
     let mut levels = Vec::new();
     flatten(&target.hierarchy, &mut levels);
+    // A closed universe does not prove which of its works belong to a sub-series.
+    // Each sub-series needs its own complete source-scoped declaration.
+    for level in levels.iter().skip(1) {
+        if !complete.contains(&(normalize(universe), normalize(&level.name))) {
+            run.missing_scopes.push(level.name.clone());
+            run.notes.push(format!("Independent {} membership coverage is incomplete; its chronological number is not verified",level.name));
+        }
+    }
+    if !run.missing_scopes.is_empty() {
+        return Ok(run);
+    }
     if levels.len() > 4 {
         run.status = "schema_capacity".into();
         run.notes.push("Verified memberships exceed four display fields; full hierarchy retained, no membership discarded".into());
@@ -599,7 +628,9 @@ pub fn research_book(
         .flat_map(|c| &c.evidence.facts.works)
         .find(|w| matches(book, w))
         .and_then(|w| w.universe.clone());
-    let investigation_key = known
+    let missing = calculate(book, &corpus)?.missing_scopes;
+    let target_scope = missing.first().cloned().or_else(|| known.clone());
+    let investigation_key = target_scope
         .as_ref()
         .map(|u| format!("universe:{}", normalize(u)))
         .unwrap_or_else(|| format!("work:{}:{}", normalize(&book.title), normalize(author)));
@@ -608,7 +639,7 @@ pub fn research_book(
         .get(&investigation_key)
         .cloned()
         .unwrap_or_default();
-    let mut queries = match known.as_ref() {
+    let mut queries = match target_scope.as_ref() {
         Some(universe) => vec![
             format!("{universe} complete chronology bibliography"),
             format!("{universe} fictional timeline chronological order"),
@@ -625,7 +656,7 @@ pub fn research_book(
         ],
     };
     if investigation.successful_queries.len() >= 2 {
-        queries = match known.as_ref() {
+        queries = match target_scope.as_ref() {
             Some(universe) => vec![
                 format!("{universe} author official in-universe timeline"),
                 format!("{universe} specialist fictional dates chronological bibliography"),

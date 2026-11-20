@@ -16,7 +16,9 @@ The full authorized validation run on 2026-11-19 passed:
 - Formatting, Python syntax and whitespace checks. Clippy completed with warnings.
 
 This is a tested development snapshot, **not approval for unattended whole-library
-deployment**. Independent per-series completeness and source corroboration remain
+deployment**. Independent per-series completeness gates now reject missing scoped
+bibliographies, omitted memberships and same-named scopes from another universe.
+General bibliography coverage and independent source corroboration remain
 unfinished. The previously external core is now vendored with its source hashes
 and license; the tested build does not require another checkout.
 No existing ebook library was modified
@@ -64,6 +66,14 @@ tests (including the live/local-model gates) and all 74 Python tests under
 isolated Calibre Python. Builds no longer require another working checkout.
 Evidence completeness, independent per-series coverage and source corroboration
 are still required before unattended whole-library curation can be considered complete.
+Bibliography verification on 2026-11-20 passed 57 default Rust tests, with 3
+HTTP/model opt-ins skipped, and all 74 Python tests under isolated Calibre Python,
+including all six native API cases. The Rust run includes the independent-scope
+regressions and guarded temporary-library workflow, including refusal when any of
+the three sub-series scopes is missing. The separate system-Python run and the
+format/lint/syntax-check batch were cancelled, so neither is a fresh pass in this
+verification. The initial diff whitespace check passed. Existing libraries were
+not modified; native writes used temporary fixtures only.
 
 ## Use
 The default target is the existing verified duplicate:

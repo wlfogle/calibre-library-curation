@@ -13,7 +13,7 @@ use curator_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-pub const VERSION: &str = "cited-temporal-facts-v5";
+pub const VERSION: &str = "cited-temporal-facts-v7";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,6 +21,15 @@ pub struct Coverage {
     pub universe: String,
     pub complete: bool,
     pub citations: Vec<Citation>,
+}
+
+pub fn declared_complete_scope(text: &str) -> Option<String> {
+    let pattern=regex::Regex::new(
+        r"(?i)^complete (?:in[- ]universe )?(?:chronology|chronological order|bibliography) (?:of|for)\s+(.+?)[.:]?$"
+    ).ok()?;
+    pattern
+        .captures(text.trim())
+        .map(|c| c[1].trim().to_string())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -248,19 +257,18 @@ pub fn screen(
         }
     }
     if !missing_work {
-        let heading = regex::Regex::new(
-            r"(?i)^complete (?:in[- ]universe )?(?:chronology|chronological order) (?:of|for)\s+(.+?)[.:]?$",
-        )?;
         for segment in segments
             .iter()
             .filter(|s| s.kind.starts_with('h') || s.kind == "title")
         {
-            if let Some(capture) = heading.captures(segment.text.trim()) {
-                let universe = capture[1].trim().to_string();
+            if let Some(universe) = declared_complete_scope(&segment.text) {
                 if chunk.evidence.facts.works.iter().any(|w| {
                     w.universe
                         .as_ref()
                         .is_some_and(|u| normalize(u) == normalize(&universe))
+                        || w.memberships
+                            .iter()
+                            .any(|m| normalize(&m.name) == normalize(&universe))
                 }) {
                     chunk
                         .coverage
@@ -401,15 +409,18 @@ pub fn validate(chunk: &Chunk) -> Result<()> {
     for coverage in &chunk.coverage {
         let proof =
             curator_core::ai::citations_text(&coverage.citations, &chunk.evidence.source.segments)?;
-        let text = proof.to_lowercase();
+        let scoped = coverage.citations.iter().any(|c| {
+            chunk.evidence.source.segments.iter().any(|s| {
+                s.ordinal == c.segment
+                    && (s.kind == "title" || s.kind.starts_with('h'))
+                    && declared_complete_scope(&s.text)
+                        .is_some_and(|name| normalize(&name) == normalize(&coverage.universe))
+            })
+        });
         if !normalize(&proof).contains(&normalize(&coverage.universe))
-            || (coverage.complete && !(text.contains("complete") || text.contains("all works"))
-                || coverage.complete
-                    && !["chronolog", "bibliograph", "all works"]
-                        .iter()
-                        .any(|s| text.contains(s)))
+            || coverage.complete && !scoped
         {
-            bail!("Complete-universe coverage is not explicitly established by the source");
+            bail!("Complete bibliography scope is not explicitly established by a source heading");
         }
     }
     Ok(())

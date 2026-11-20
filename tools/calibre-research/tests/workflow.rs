@@ -1,3 +1,5 @@
+#[path = "support/bibliography.rs"]
+mod bibliography;
 #[path = "../src/curation.rs"]
 mod curation;
 #[path = "../src/facts.rs"]
@@ -168,6 +170,41 @@ b=sqlite3.connect(source/'metadata.db'); a.backup(b); b.close(); a.close()
             chunks: extracted,
         },
     );
+    for scope in ["Keep Existing Branch", "Inner Arc", "Smallest Arc"] {
+        let members = works
+            .iter()
+            .filter(|w| w.memberships.iter().any(|m| m.name == scope))
+            .cloned()
+            .collect::<Vec<_>>();
+        let url = format!(
+            "https://scope.example/{}",
+            curator_core::matching::normalize(scope)
+        );
+        let document = bibliography::series_document(scope, &members, &url);
+        corpus.pages.insert(url, document);
+    }
+    let target = app
+        .scan
+        .as_ref()
+        .unwrap()
+        .books
+        .iter()
+        .find(|b| b.title == "Unplaced One")
+        .unwrap();
+    let verified = curation::calculate(target, &corpus).unwrap();
+    assert_eq!(verified.status, "ready");
+    assert_eq!(verified.field_mask, [true; 4]);
+    for scope in ["Keep Existing Branch", "Inner Arc", "Smallest Arc"] {
+        let mut incomplete = corpus.clone();
+        incomplete.pages.remove(&format!(
+            "https://scope.example/{}",
+            curator_core::matching::normalize(scope)
+        ));
+        let pending = curation::calculate(target, &incomplete).unwrap();
+        assert_eq!(pending.status, "research_pending");
+        assert_eq!(pending.field_mask, [false; 4]);
+        assert_eq!(pending.missing_scopes, vec![scope]);
+    }
     app.store
         .cache_value(curation::CORPUS_KEY, &corpus)
         .unwrap();
