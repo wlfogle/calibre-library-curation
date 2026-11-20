@@ -27,7 +27,15 @@ Fetch failures also allow discovery on the next run instead of trapping research
 in a permanently failing saved queue.
 
 ## Deployment readiness
-The subsequent authorized one-book live acceptance **failed**: full search was
+The explicit opt-in regression run against commit `728b3c7` passed all three
+tests: installed-Ollama fact extraction, live configured-source research/native
+readback, and live automatic discovery without configured-URL fallback. Each
+HTTP/native test updated and verified three Known Space books in a new temporary
+library. Together with the 82 default tests, all 85 adapter tests have passed.
+These source-specific live cases do not establish whole-library completeness or
+live verification of the local-only sparse-export case.
+
+The separate Sentinel production acceptance **failed**: full search was
 blocked and returned leads did not establish the target work. Four extraction
 calls had been spent on an unrelated page, with the last response truncated.
 Source selection now checks work/author or an already verified universe before

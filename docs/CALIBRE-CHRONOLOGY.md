@@ -344,6 +344,26 @@ was modified and no live HTTP/model calls were made during this validation.
 The user's verified **Greater Eternal Champion Saga is the structural and in-universe chronological reference**, not a publication-order template. Read-only inspection confirmed 94 protected books. A regression retains the actual independent assignments for Dreamthief's Daughter (saga 97 / Elric 10 / The Moonbeam Roads 1), The Skrayling Tree (98 / 11 / 2), and The White Wolf's Son (saga 99 / The Moonbeam Roads 3 / Oona Von Bek 3). The hierarchy does not copy a parent index into a child or renumber these protected books.
 
 ### Live discovery and three-book research to native updates
+Explicit opt-in regression verification on 2026-11-20 against commit `728b3c7`
+passed all three tests, serially and without retries:
+- Installed Ollama extracted the unfamiliar synthetic temporal-facts case.
+- Live configured-source research verified native updates for three Known Space
+  books in a new temporary library.
+- Live automatic discovery, without a configured-URL fallback, independently
+  verified those three books in another new temporary library.
+
+The 82 default adapter tests and these 3 opt-in tests all passed. No existing
+library was an apply target. Complete logs are retained privately at
+`/home/loufogle/.cache/calibre-live-verification-4kih47h7/`; extraction diagnostics
+at `/tmp/nexus-extractor-proof-IDfap2`; configured-source readback evidence at
+`/tmp/nexus-live-book-e2e-eRk7cX`; and discovery/readback evidence at
+`/tmp/nexus-live-discovery-XvoHTj` and `/tmp/nexus-live-book-e2e-aYzhve`.
+These are source-specific, selected-three-work-context tests. They are not
+whole-universe numbering verification, do not exercise a live local-only
+production export, and do not supersede the separate failed Sentinel production
+acceptance. Independent local-only sparse export remains covered by the offline
+production/native workflow.
+
 `tools/calibre-research/tests/live_book.rs` has two opt-in acceptance tests covering **Ringworld**, **The Ringworld Engineers** and **The Ringworld Throne**:
 - Configured-source research fetches the live Niven-hosted chronology and separate membership guide.
 - Automatic discovery starts with a book/author query, uses the existing guarded search/cache, prioritizes author-site chronology leads before truncating results, and follows relevant source links. It permits at most four source-page fetches and never falls back to the configured URLs to claim discovery success.
