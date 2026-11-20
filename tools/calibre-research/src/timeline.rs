@@ -775,6 +775,39 @@ struct Node {
     problems: Vec<String>,
 }
 
+fn scoped_positions(
+    evidence: &[Evidence],
+    members: &BTreeSet<String>,
+    unambiguous_titles: &BTreeSet<String>,
+) -> Result<Vec<Placement>> {
+    let titles = evidence
+        .iter()
+        .flat_map(|b| &b.facts.works)
+        .filter(|w| members.contains(&key(w)))
+        .map(|w| normalize(&w.title))
+        .collect::<BTreeSet<_>>();
+    let mut scoped = Vec::new();
+    for bundle in evidence {
+        let mut selected = bundle.clone();
+        selected.facts.works.retain(|w| members.contains(&key(w)));
+        for work in &mut selected.facts.works {
+            // Projection only: original memberships and citations remain retained.
+            // Removing memberships bounds recursion to one projection level.
+            work.memberships.clear();
+        }
+        selected.facts.relations.retain(|r| {
+            [&r.before, &r.after].iter().all(|title| {
+                let title = normalize(title);
+                titles.contains(&title) && unambiguous_titles.contains(&title)
+            })
+        });
+        if !selected.facts.works.is_empty() || !selected.facts.relations.is_empty() {
+            scoped.push(selected);
+        }
+    }
+    solve(&scoped)
+}
+
 /// Derive order for all known works, including unowned works present in evidence.
 pub fn solve(evidence: &[Evidence]) -> Result<Vec<Placement>> {
     let mut nodes: BTreeMap<String, Node> = BTreeMap::new();
@@ -945,6 +978,31 @@ pub fn solve(evidence: &[Evidence]) -> Result<Vec<Placement>> {
                 for name in nodes[id].memberships.keys() {
                     *counts.entry(name.clone()).or_default() += 1;
                     member_ranks.insert((id.clone(), name.clone()), counts[name] as f64);
+                }
+            }
+        } else {
+            let scopes = group
+                .iter()
+                .flat_map(|(_, node)| node.memberships.keys().cloned())
+                .collect::<BTreeSet<_>>();
+            let unambiguous_titles = by_title
+                .iter()
+                .filter(|(_, ids)| ids.len() == 1)
+                .map(|(title, _)| title.clone())
+                .collect::<BTreeSet<_>>();
+            for scope in scopes {
+                let members = group
+                    .iter()
+                    .filter(|(_, node)| node.memberships.contains_key(&scope))
+                    .collect::<Vec<_>>();
+                if members.iter().any(|(_, node)| !node.problems.is_empty()) {
+                    continue;
+                }
+                let ids = members.iter().map(|(id, _)| (**id).clone()).collect();
+                for placement in scoped_positions(evidence, &ids, &unambiguous_titles)? {
+                    if let Some(rank) = placement.global_rank {
+                        member_ranks.insert((placement.work_key, scope.clone()), rank);
+                    }
                 }
             }
         }

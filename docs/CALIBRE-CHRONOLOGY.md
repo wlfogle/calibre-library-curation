@@ -228,14 +228,50 @@ The pre-vendoring full validation passed all **53 Rust tests with no skips** and
 The reported `Less than 21 GiB free` refusal is a storage preflight, not a research result. A read-only research run may use a separate filesystem with sufficient workspace reserve through `--workspace`; every apply still checks the unchanged 21 GiB reserve on the library filesystem as well. No files are deleted and no reserve is lowered automatically.
 
 ### Nested series data structure
-The production calculator now requires an explicit, cited complete bibliography
-or chronology heading for the universe and independently for every displayed
-sub-series. A universe-wide bibliography alone does not verify sub-series ranks.
+The production calculator requires an explicit, cited complete bibliography or
+chronology scope independently for each level it exports. A universe-wide
+bibliography alone does not verify sub-series ranks; an incomplete universe does
+not prevent an independently complete sub-series from being ordered.
 Recognized bibliography entries must each have a validated work identity and
 membership in the claimed scope within that document. An omitted entry or an
-extracted title with missing scoped membership leaves the mapping
-`research_pending`, with all four export flags false. Completeness is keyed by
+extracted title with missing scoped membership withholds that scope's field.
+Other independently verified fields may be exported with `partial` status;
+otherwise the result remains `research_pending`. Completeness is keyed by
 both universe and scope; a same-named series in another universe cannot satisfy it.
+
+When the global chronology is unresolved, the solver reuses its existing
+validators and ordering rules on each membership's work set. Original evidence
+and memberships are preserved; only the internal ordering projection removes
+membership fields. Local ties, missing temporal evidence and conflicting member
+claims still block that scope's rank. Globally ambiguous title-only relationships
+cannot become unambiguous merely by filtering competing works out of a scope.
+The conservative projection uses dates and relationships with identified
+endpoints inside the scope; it does not infer new edges through outside works.
+
+All four export flags are independent. An incomplete or unordered universe
+index is null in the reported nested hierarchy and omitted from the exported
+fields, leaving stored main-series metadata unchanged. A local field is withheld
+if an ancestor is neither supported in the same mapping nor already stored under
+the cited name. A matching stored name is display context, not approval of its
+old index. Unknown local fields are also preserved, not cleared. Saved-result
+revalidation checks the nested hierarchy and missing scopes as well as field
+values, masks and source evidence. Cached partial mappings can be used with
+model assistance disabled while unresolved levels remain retryable.
+
+The offline production workflow exercises a local-only update of all three
+sub-series levels while retaining an unsupported main-series index of 77. It
+checks that the main pair is absent from the export and its nested index is null,
+that protected and unsupported records are unchanged, and that the mapping remains
+in retry as partial. Restoring universe evidence then permits the existing full
+research/apply and idempotence checks. These are synthetic temporary-library
+checks, not a successful real-source acceptance.
+
+Independent-index verification passed 82 default Rust tests (3 live opt-ins
+skipped), all 74 isolated Calibre-Python tests, and the system-Python suite with
+6 native-only skips. Rust formatting, Python syntax and whitespace checks passed;
+Clippy completed with warnings, without errors. No live requests, inference or
+existing-library writes were performed for this change.
+
 `missing_scopes` is retained in the research result, and subsequent bounded
 research targets the first missing scope rather than repeating a generic book query.
 Before discovery, normal continuation processes relevant unfinished cached source

@@ -4,6 +4,15 @@ Source-backed research and in-universe chronology tools for a Calibre ebook libr
 ## Status
 The production batch executable uses shared source facts and a chronology solver.
 Main series plus all three sub-series fields have independently numbered positions.
+Verified sub-series positions can now be calculated and exported while the wider
+universe remains incomplete or unordered. Each exported level still needs its own
+complete scope and supported chronology. Unknown indices stay untouched, and
+local writes require verified or matching stored parent names. Partial mappings
+remain in the research retry report rather than being called fully verified.
+Independent-index validation passed 82 default Rust tests (3 live opt-ins
+skipped) and all 74 isolated Calibre-Python tests. The native workflow confirms
+that verified sub-series fields can change while an unsupported main index is
+preserved. This does not resolve the failed real-source discovery acceptance.
 The guarded temporary-library workflow has passed, but whole-library curation is
 **not complete**. Source discovery, extraction and incomplete bibliography cases can
 still require automatic retry. Old metadata and research are leads, not proof.

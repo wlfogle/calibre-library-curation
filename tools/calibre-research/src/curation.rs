@@ -603,8 +603,7 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
     run.evidence = selected.iter().map(|c| proof(c)).collect();
     if !complete.contains(&(normalize(universe), normalize(universe))) {
         run.missing_scopes.push(universe.clone());
-        run.notes.push(format!("Complete {universe} bibliography coverage has not been verified; subset ranks cannot be exported"));
-        return Ok(run);
+        run.notes.push(format!("Complete {universe} bibliography coverage has not been verified; a universe-wide index cannot be exported"));
     }
     let mut bundles = selected
         .iter()
@@ -672,34 +671,45 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
     let target = target[0];
     if target.global_rank.is_none() {
         run.notes.extend(target.problems.clone());
-        return Ok(run);
     }
+    let mut hierarchy = target.hierarchy.clone();
+    clear_incomplete_indices(&mut hierarchy, universe, &complete);
     let mut levels = Vec::new();
-    flatten(&target.hierarchy, &mut levels);
+    flatten(&hierarchy, &[], &mut levels);
     // A closed universe does not prove which of its works belong to a sub-series.
     // Each sub-series needs its own complete source-scoped declaration.
-    for level in levels.iter().skip(1) {
+    for (level, _) in levels.iter().skip(1) {
         if !complete.contains(&(normalize(universe), normalize(&level.name))) {
             run.missing_scopes.push(level.name.clone());
             run.notes.push(format!("Independent {} membership coverage is incomplete; its chronological number is not verified",level.name));
         }
     }
-    if !run.missing_scopes.is_empty() {
-        return Ok(run);
-    }
     if levels.len() > 4 {
         run.status = "schema_capacity".into();
         run.notes.push("Verified memberships exceed four display fields; full hierarchy retained, no membership discarded".into());
-        run.nested = Some(target.hierarchy.clone());
+        run.nested = Some(hierarchy);
         return Ok(run);
     }
-    for (slot, level) in levels.iter().enumerate() {
+    for (slot, (level, ancestors)) in levels.iter().enumerate() {
         if level.index.is_none() {
             run.notes.push(format!(
                 "{} has no verified independent chronological index",
                 level.name
             ));
-            return Ok(run);
+            continue;
+        }
+        if ancestors.iter().any(|&parent| {
+            !run.field_mask[parent]
+                && !book.hierarchy[parent]
+                    .name
+                    .as_ref()
+                    .is_some_and(|old| normalize(old) == normalize(&levels[parent].0.name))
+        }) {
+            run.notes.push(format!(
+                "{} requires a verified or matching stored parent context; field preserved",
+                level.name
+            ));
+            continue;
         }
         run.hierarchy[slot] = SeriesValue {
             name: Some(level.name.clone()),
@@ -707,12 +717,16 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
         };
         run.field_mask[slot] = true;
     }
-    run.nested = Some(target.hierarchy.clone());
-    run.status = if book
-        .hierarchy
-        .iter()
-        .enumerate()
-        .any(|(i, old)| !run.field_mask[i] && old.name.is_some())
+    let incomplete_levels = (0..levels.len()).any(|slot| !run.field_mask[slot]);
+    run.nested = Some(hierarchy);
+    run.status = if !run.field_mask.iter().any(|supported| *supported) {
+        "research_pending"
+    } else if incomplete_levels
+        || book
+            .hierarchy
+            .iter()
+            .enumerate()
+            .any(|(i, old)| !run.field_mask[i] && old.name.is_some())
     {
         "partial"
     } else {
@@ -720,15 +734,34 @@ pub fn calculate(book: &Book, corpus: &Corpus) -> Result<Run> {
     }
     .into();
     if run.status == "partial" {
-        run.notes.push("Additional stored memberships retained pending verification; not cleared or declared verified".into());
+        run.notes.push("Only independently supported fields are exported; unresolved stored fields remain unchanged and unverified".into());
     }
     Ok(run)
 }
 
-fn flatten<'a>(node: &'a SeriesHierarchy, output: &mut Vec<&'a SeriesHierarchy>) {
-    output.push(node);
+fn clear_incomplete_indices(
+    node: &mut SeriesHierarchy,
+    universe: &str,
+    complete: &BTreeSet<(String, String)>,
+) {
+    if !complete.contains(&(normalize(universe), normalize(&node.name))) {
+        node.index = None;
+    }
+    for child in &mut node.subseries {
+        clear_incomplete_indices(child, universe, complete);
+    }
+}
+
+fn flatten<'a>(
+    node: &'a SeriesHierarchy,
+    ancestors: &[usize],
+    output: &mut Vec<(&'a SeriesHierarchy, Vec<usize>)>,
+) {
+    let mut path = ancestors.to_vec();
+    path.push(output.len());
+    output.push((node, ancestors.to_vec()));
     for child in &node.subseries {
-        flatten(child, output);
+        flatten(child, &path, output);
     }
 }
 
@@ -757,6 +790,8 @@ pub fn validate_run(run: &Run, book: &Book, store: &Store) -> Result<()> {
         || expected.field_mask != run.field_mask
         || expected.order_basis != run.order_basis
         || expected.status != run.status
+        || expected.nested != run.nested
+        || expected.missing_scopes != run.missing_scopes
         || serde_json::to_value(&expected.evidence)? != serde_json::to_value(&run.evidence)?
     {
         bail!("Universe research changed; recalculate affected mappings before export");
@@ -785,6 +820,9 @@ pub fn research_book(
     }
     if !app.data.ai_settings.enabled {
         let mut run = calculate(book, &corpus)?;
+        if run.field_mask.iter().any(|supported| *supported) {
+            return Ok(run);
+        }
         run.status = "blocked".into();
         run.notes
             .push("No verified cached result and local model extraction is disabled".into());

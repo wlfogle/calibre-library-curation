@@ -1,10 +1,15 @@
 #[test]
 fn universe_completeness_does_not_verify_an_independent_subseries_number() {
-    let (book, mut corpus) = fixture();
+    let (mut book, mut corpus) = fixture();
+    book.hierarchy[1] = SeriesValue {
+        name: Some("Small Arc".into()),
+        index: Some(37.0),
+    };
     corpus.pages.remove("https://scope.example/small-arc");
     let incomplete = curation::calculate(&book, &corpus).unwrap();
-    assert_eq!(incomplete.status, "research_pending");
-    assert_eq!(incomplete.field_mask, [false; 4]);
+    assert_eq!(incomplete.status, "partial");
+    assert_eq!(incomplete.field_mask, [true, false, false, false]);
+    assert_eq!(incomplete.hierarchy[1], book.hierarchy[1]);
     assert_eq!(incomplete.missing_scopes, vec!["Small Arc".to_string()]);
     assert!(incomplete
         .notes
@@ -27,8 +32,8 @@ fn extracted_title_without_scoped_membership_cannot_complete_a_subseries() {
         }
     }
     let result = curation::calculate(&book, &corpus).unwrap();
-    assert_eq!(result.status, "research_pending");
-    assert_eq!(result.field_mask, [false; 4]);
+    assert_eq!(result.status, "partial");
+    assert_eq!(result.field_mask, [true, false, false, false]);
     assert_eq!(result.missing_scopes, vec!["Small Arc"]);
 }
 
@@ -51,8 +56,8 @@ fn same_named_series_in_another_universe_cannot_supply_completeness() {
         bibliography::series_document("Small Arc", &foreign_works, url),
     );
     let result = curation::calculate(&book, &corpus).unwrap();
-    assert_eq!(result.status, "research_pending");
-    assert_eq!(result.field_mask, [false; 4]);
+    assert_eq!(result.status, "partial");
+    assert_eq!(result.field_mask, [true, false, false, false]);
     assert_eq!(result.missing_scopes, vec!["Small Arc"]);
 }
 
@@ -71,8 +76,8 @@ fn omitted_work_in_subseries_source_cannot_borrow_complete_universe_membership()
             .retain(|w| w.title != "Later Work");
     }
     let result = curation::calculate(&book, &corpus).unwrap();
-    assert_eq!(result.status, "research_pending");
-    assert_eq!(result.field_mask, [false; 4]);
+    assert_eq!(result.status, "partial");
+    assert_eq!(result.field_mask, [true, false, false, false]);
     assert_eq!(result.missing_scopes, vec!["Small Arc"]);
 }
 
@@ -219,8 +224,8 @@ fn known_identity_resumes_cached_membership_chunks_within_each_call_budget() {
         );
         let result = curation::calculate(&book, &corpus).unwrap();
         if expected_remaining > 0 {
-            assert_eq!(result.status, "research_pending");
-            assert_eq!(result.field_mask, [false; 4]);
+            assert_eq!(result.status, "partial");
+            assert_eq!(result.field_mask, [true, false, false, false]);
         } else {
             assert_eq!(result.status, "ready");
             assert_eq!(result.hierarchy[1].index, Some(1.0));
@@ -363,7 +368,7 @@ fn linked_bibliography_frontier_survives_a_saved_corpus_checkpoint() {
     assert_eq!(queued, vec![guide]);
     assert_eq!(
         curation::calculate(&book, &resumed).unwrap().status,
-        "research_pending"
+        "partial"
     );
     // Replay the already-screened synthetic bibliography at its original URL.
     let scope_url = scope.page.source.location.clone();
@@ -600,6 +605,94 @@ fn stored_series_can_disambiguate_a_query_but_cannot_verify_a_mapping() {
     assert_eq!(result.status, "research_pending");
     assert_eq!(result.field_mask, [false; 4]);
     assert_eq!(result.hierarchy, book.hierarchy);
+}
+
+#[test]
+fn complete_local_scope_preserves_an_unverified_main_index() {
+    let (mut book, mut corpus) = fixture();
+    book.hierarchy[0] = SeriesValue {
+        name: Some("New Universe".into()),
+        index: Some(999.0),
+    };
+    corpus.pages.remove("https://example.org/chronology");
+    let result = curation::calculate(&book, &corpus).unwrap();
+    assert_eq!(result.status, "partial");
+    assert_eq!(result.field_mask, [false, true, false, false]);
+    assert_eq!(result.hierarchy[0], book.hierarchy[0]);
+    assert_eq!(result.hierarchy[1].name.as_deref(), Some("Small Arc"));
+    assert_eq!(result.hierarchy[1].index, Some(1.0));
+    assert_eq!(result.missing_scopes, vec!["New Universe"]);
+    let nested = result.nested.unwrap();
+    assert_eq!(nested.index, None);
+    assert_eq!(nested.subseries[0].index, Some(1.0));
+}
+
+#[test]
+fn local_index_is_not_applied_under_a_missing_or_different_parent_context() {
+    for old_name in [None, Some("Unrelated Universe")] {
+        let (mut book, mut corpus) = fixture();
+        book.hierarchy[0] = SeriesValue {
+            name: old_name.map(String::from),
+            index: Some(77.0),
+        };
+        corpus.pages.remove("https://example.org/chronology");
+        let result = curation::calculate(&book, &corpus).unwrap();
+        assert_eq!(result.status, "research_pending");
+        assert_eq!(result.field_mask, [false; 4]);
+        assert_eq!(result.hierarchy, book.hierarchy);
+        assert_eq!(result.nested.unwrap().subseries[0].index, Some(1.0));
+    }
+}
+
+#[test]
+fn ambiguous_global_order_does_not_discard_a_verified_local_rank() {
+    let (mut book, mut corpus) = fixture();
+    book.hierarchy[0] = SeriesValue {
+        name: Some("New Universe".into()),
+        index: Some(77.0),
+    };
+    let url = "https://example.org/chronology";
+    let mut works = corpus.pages["https://scope.example/small-arc"]
+        .chunks
+        .iter()
+        .flat_map(|c| c.evidence.facts.works.iter().cloned())
+        .collect::<Vec<_>>();
+    let mut parallel = works[0].clone();
+    parallel.title = "Unrelated Parallel Work".into();
+    parallel.memberships.clear();
+    works.push(parallel);
+    corpus.pages.insert(
+        url.into(),
+        bibliography::series_document("New Universe", &works, url),
+    );
+    let result = curation::calculate(&book, &corpus).unwrap();
+    assert_eq!(result.status, "partial");
+    assert_eq!(result.field_mask, [false, true, false, false]);
+    assert_eq!(result.hierarchy[0], book.hierarchy[0]);
+    assert_eq!(result.hierarchy[1].index, Some(1.0));
+    assert!(result.missing_scopes.is_empty());
+    assert!(result
+        .notes
+        .iter()
+        .any(|n| n.contains("No unique in-universe order")));
+}
+
+#[test]
+fn partial_hierarchy_revalidation_rejects_an_invented_global_index() {
+    let (mut book, mut corpus) = fixture();
+    book.hierarchy[0] = SeriesValue {
+        name: Some("New Universe".into()),
+        index: Some(77.0),
+    };
+    corpus.pages.remove("https://example.org/chronology");
+    let root = tempfile::tempdir().unwrap();
+    let store = curator_core::store::Store::open(root.path()).unwrap();
+    store.cache_value(curation::CORPUS_KEY, &corpus).unwrap();
+    let mut run = curation::calculate(&book, &corpus).unwrap();
+    assert_eq!(run.field_mask, [false, true, false, false]);
+    curation::validate_run(&run, &book, &store).unwrap();
+    run.nested.as_mut().unwrap().index = Some(77.0);
+    assert!(curation::validate_run(&run, &book, &store).is_err());
 }
 
 #[test]

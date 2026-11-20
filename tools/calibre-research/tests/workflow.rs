@@ -47,8 +47,8 @@ ids,_=cache.add_books([(Metadata(t,['Test Author']),{}) for t in
     ('Unplaced One','Unplaced Two','Protected Book')],run_hooks=False)
 cache.set_field('#series2',{ids[0]:'Keep Existing Branch'})
 cache.set_field('#series2_index',{ids[0]:7.5})
-cache.set_field('series',{ids[2]:'Greater Foundation Universe'})
-cache.set_field('series_index',{ids[2]:9})
+cache.set_field('series',{ids[0]:'Fixture Universe',ids[2]:'Greater Foundation Universe'})
+cache.set_field('series_index',{ids[0]:77,ids[2]:9})
 fields=['series','series_index','#series2','#series2_index','#series3','#series3_index','#series4','#series4_index']
 with (root/'baseline.csv').open('w',newline='') as stream:
     writer=csv.DictWriter(stream,fieldnames=['id','uuid',*fields]); writer.writeheader()
@@ -194,15 +194,19 @@ b=sqlite3.connect(source/'metadata.db'); a.backup(b); b.close(); a.close()
     let verified = curation::calculate(target, &corpus).unwrap();
     assert_eq!(verified.status, "ready");
     assert_eq!(verified.field_mask, [true; 4]);
-    for scope in ["Keep Existing Branch", "Inner Arc", "Smallest Arc"] {
+    for (scope, expected_mask) in [
+        ("Keep Existing Branch", [true, false, true, true]),
+        ("Inner Arc", [true, true, false, false]),
+        ("Smallest Arc", [true, true, true, false]),
+    ] {
         let mut incomplete = corpus.clone();
         incomplete.pages.remove(&format!(
             "https://scope.example/{}",
             curator_core::matching::normalize(scope)
         ));
         let pending = curation::calculate(target, &incomplete).unwrap();
-        assert_eq!(pending.status, "research_pending");
-        assert_eq!(pending.field_mask, [false; 4]);
+        assert_eq!(pending.status, "partial");
+        assert_eq!(pending.field_mask, expected_mask);
         assert_eq!(pending.missing_scopes, vec![scope]);
     }
     app.store
@@ -274,6 +278,59 @@ b=sqlite3.connect(source/'metadata.db'); a.backup(b); b.close(); a.close()
     let exceptions: Value = serde_json::from_slice(&listed.stdout).unwrap();
     assert_eq!(exceptions["automatic_retries"], 2);
     let app = App::open(&engine_workspace, Default::default()).unwrap();
+    let mut local_only = original_corpus.clone();
+    local_only.pages.remove("https://author.example/chronology");
+    app.store
+        .cache_value(curation::CORPUS_KEY, &local_only)
+        .unwrap();
+    drop(app);
+    let local_book_id = exported["mappings"][0]["id"].as_i64().unwrap().to_string();
+    run_wrapper(&["--book", &local_book_id, "--limit", "1", "--apply"]);
+    let local_summary: Value =
+        serde_json::from_slice(&run_wrapper(&["--last-summary"]).stdout).unwrap();
+    assert_eq!(local_summary["apply_status"], "applied");
+    assert_eq!(local_summary["validated_mapping_rows"], 1);
+    assert_eq!(local_summary["proposed_changes"], 1);
+    let mut app = App::open(&engine_workspace, Default::default()).unwrap();
+    app.refresh().unwrap();
+    let local_scan = app.scan.as_ref().unwrap();
+    assert_eq!(
+        local_scan.books[0].hierarchy[0].name.as_deref(),
+        Some("Fixture Universe")
+    );
+    assert_eq!(local_scan.books[0].hierarchy[0].index, Some(77.0));
+    assert_eq!(local_scan.books[0].hierarchy[1].index, Some(2.0));
+    assert_eq!(local_scan.books[0].hierarchy[2].index, Some(1.0));
+    assert_eq!(local_scan.books[0].hierarchy[3].index, Some(1.0));
+    assert!(local_scan.books[1]
+        .hierarchy
+        .iter()
+        .all(|s| s.name.is_none()));
+    assert_eq!(local_scan.books[2].hierarchy, protected_before);
+    let partial_export: Value = serde_json::from_slice(
+        &fs::read(engine_workspace.join("exports").join(format!(
+            "{}.json",
+            local_summary["job_id"].as_str().unwrap()
+        )))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        partial_export["mappings"][0]["field_mask"],
+        json!([false, true, true, true])
+    );
+    assert!(partial_export["mappings"][0]["fields"]
+        .get("series")
+        .is_none());
+    assert!(partial_export["mappings"][0]["fields"]
+        .get("series_index")
+        .is_none());
+    assert!(partial_export["mappings"][0]["hierarchy"]["index"].is_null());
+    assert!(partial_export["retries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["status"] == "partial"));
     app.store
         .cache_value(curation::CORPUS_KEY, &original_corpus)
         .unwrap();
