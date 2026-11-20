@@ -4,11 +4,48 @@ Source-backed research and in-universe chronology tools for a Calibre ebook libr
 ## Status
 The production batch executable uses shared source facts and a chronology solver.
 Main series plus all three sub-series fields have independently numbered positions.
+Verified sub-series positions can now be calculated and exported while the wider
+universe remains incomplete or unordered. Each exported level still needs its own
+complete scope and supported chronology. Unknown indices stay untouched, and
+local writes require verified or matching stored parent names. Partial mappings
+remain in the research retry report rather than being called fully verified.
+Independent-index validation passed 82 default Rust tests (3 live opt-ins
+skipped) and all 74 isolated Calibre-Python tests. The native workflow confirms
+that verified sub-series fields can change while an unsupported main index is
+preserved. This does not resolve the failed real-source discovery acceptance.
 The guarded temporary-library workflow has passed, but whole-library curation is
 **not complete**. Source discovery, extraction and incomplete bibliography cases can
 still require automatic retry. Old metadata and research are leads, not proof.
+Automatic continuation now prioritizes unfinished cached bibliography scopes even
+after work identity is known. Existing page/call budgets still apply; extraction
+failures stop the pass and retain diagnostics instead of triggering more searches.
+Sub-series retry state is separated by universe and scope.
+Unvisited source links now survive research checkpoints. Completed cached pages
+forward their links without consuming another page slot, and failed fetches move
+behind unvisited sources rather than repeatedly starving the queue.
+Fetch failures also allow discovery on the next run instead of trapping research
+in a permanently failing saved queue.
 
 ## Deployment readiness
+The explicit opt-in regression run against commit `728b3c7` passed all three
+tests: installed-Ollama fact extraction, live configured-source research/native
+readback, and live automatic discovery without configured-URL fallback. Each
+HTTP/native test updated and verified three Known Space books in a new temporary
+library. Together with the 82 default tests, all 85 adapter tests have passed.
+These source-specific live cases do not establish whole-library completeness or
+live verification of the local-only sparse-export case.
+
+The separate Sentinel production acceptance **failed**: full search was
+blocked and returned leads did not establish the target work. Four extraction
+calls had been spent on an unrelated page, with the last response truncated.
+Source selection now checks work/author or an already verified universe before
+inference; the bounded follow-up made zero further extraction calls. Stored
+series names are discovery hints only. This prevents demonstrated waste but does
+not resolve search availability or establish a verified chronology.
+After this correction, 73 default Rust tests passed (3 live opt-ins skipped),
+including the production temporary-library workflow. Formatting and whitespace
+checks passed; Clippy completed with warnings, without errors.
+
 The full authorized validation run on 2026-11-19 passed:
 - All 53 Rust tests, including the three opt-in public-HTTP/local-model tests.
 - All 74 Python tests under Calibre Python, including all six native API tests.
@@ -53,6 +90,13 @@ cargo test --locked --offline --manifest-path tools/calibre-research/Cargo.toml
 
 The Rust workflow test creates and writes only a new temporary library. Its normal
 Calibre writer guards still require the GUI and other writers to be closed.
+The minimum cached-evidence path is verified by that test: the normal Python
+research-and-apply command rebuilds two book results from source facts, exports
+the mapping CSV, rehearses and applies it, and compares every selected name/index
+pair with native Calibre readback. All four series levels are exercised. Protected
+metadata and the source fixture stay unchanged; a second apply makes no changes.
+The source facts are synthetic offline fixtures, not fresh online research or
+proof of whole-library chronology.
 Do not run the benchmark or opt-in online/model tests merely to verify a move.
 Relocation verification: the Python suite ran 69 tests with 6 native-runtime skips;
 Rust ran 39 passing tests with 3 opt-in skips. The guarded temporary-library
@@ -74,6 +118,30 @@ the three sub-series scopes is missing. The separate system-Python run and the
 format/lint/syntax-check batch were cancelled, so neither is a fresh pass in this
 verification. The initial diff whitespace check passed. Existing libraries were
 not modified; native writes used temporary fixtures only.
+Latest continuation verification passed 70 default Rust tests (3 HTTP/model
+opt-ins skipped) and all 74 isolated Calibre-Python tests. Thirteen new offline
+regressions cover cached extraction and durable linked-source continuation.
+Rust formatting, Python syntax (10 files) and whitespace checks passed; Clippy
+completed with warnings, without errors. Existing libraries were not modified.
+
+## Actual-library verification, 2026-11-20
+The read-only duplicate-library check covered all 8,524 records. Both original and
+duplicate metadata databases passed SQLite integrity checks. UUIDs were unique
+and valid, series indices were finite, all three custom series columns were
+present, and no original-baseline books were missing. There were 218 write-protected
+records; protection does not establish verified chronology.
+
+Export validation against a snapshot of the default retained research workspace
+produced **zero verified mappings**, with one stale/invalid saved result. Thus all
+8,524 records still lack an exportable verified mapping in that workspace:
+**whole-library chronology verification has not passed**. No fresh online research
+or metadata apply was performed. Database hashes remained unchanged. Verification
+used a separate research workspace because the library filesystem was below the
+unchanged 21 GiB reserve.
+
+Final code validation passed 70 default Rust tests (3 live opt-ins skipped), all
+74 isolated Calibre-Python tests, and 74 system-Python tests with 6 native-only
+skips. These passing tests do not override the zero verified library coverage.
 
 ## Use
 The default target is the existing verified duplicate:

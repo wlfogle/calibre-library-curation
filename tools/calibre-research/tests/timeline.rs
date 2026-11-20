@@ -382,6 +382,160 @@ fn fictional_time_overrides_publication_and_recommended_order() {
     assert_eq!(late.memberships[0].1, Some(2.0));
 }
 
+fn independent_arcs(a_later: &str) -> Evidence {
+    let mut lines = Vec::new();
+    let mut works = Vec::new();
+    for (title, scope, date, label) in [
+        ("A Beginning", "Arc A", "100 AD", 7.0),
+        ("A Later", "Arc A", a_later, 1.0),
+        ("B Beginning", "Arc B", "100 AD", 1.0),
+        ("B Later", "Arc B", "200 AD", 2.0),
+    ] {
+        let text =
+            format!("Test World: {title} by Test Writer is set in {date}. {scope} book {label}.");
+        works.push(dated(
+            title,
+            "Test Writer",
+            "Test World",
+            "ad",
+            date,
+            Some((scope, label)),
+            lines.len() + 1,
+            &text,
+        ));
+        lines.push(text);
+    }
+    evidence(&lines, works, vec![])
+}
+
+#[test]
+fn subseries_positions_do_not_require_a_unique_cross_series_order() {
+    let output = timeline::solve(&[independent_arcs("200 AD")]).unwrap();
+    assert!(output.iter().all(|p| p.global_rank.is_none()));
+    for (title, expected) in [
+        ("A Beginning", 1.0),
+        ("A Later", 2.0),
+        ("B Beginning", 1.0),
+        ("B Later", 2.0),
+    ] {
+        let placement = output.iter().find(|p| p.title == title).unwrap();
+        assert_eq!(placement.memberships[0].1, Some(expected));
+        assert_eq!(placement.hierarchy.index, None);
+        assert_eq!(placement.hierarchy.subseries[0].index, Some(expected));
+    }
+}
+
+#[test]
+fn local_ties_do_not_get_published_or_alphabetical_fallback_positions() {
+    let output = timeline::solve(&[independent_arcs("100 AD")]).unwrap();
+    assert!(output
+        .iter()
+        .filter(|p| p.title.starts_with('A'))
+        .all(|p| p.memberships[0].1.is_none()));
+    assert_eq!(
+        output
+            .iter()
+            .find(|p| p.title == "B Later")
+            .unwrap()
+            .memberships[0]
+            .1,
+        Some(2.0)
+    );
+}
+
+#[test]
+fn missing_local_time_does_not_block_an_unrelated_dated_subseries() {
+    let mut bundle = independent_arcs("200 AD");
+    bundle.facts.works[1].settings.clear();
+    let output = timeline::solve(&[bundle]).unwrap();
+    assert!(output
+        .iter()
+        .filter(|p| p.title.starts_with('A'))
+        .all(|p| p.memberships[0].1.is_none()));
+    assert_eq!(
+        output
+            .iter()
+            .find(|p| p.title == "B Later")
+            .unwrap()
+            .memberships[0]
+            .1,
+        Some(2.0)
+    );
+}
+
+#[test]
+fn conflicting_local_memberships_cannot_be_erased_by_the_scope_projection() {
+    let first = independent_arcs("200 AD");
+    let text = "Test World: A Beginning by Test Writer is set in 100 AD. Arc A book 8.".to_string();
+    let other = evidence(
+        std::slice::from_ref(&text),
+        vec![dated(
+            "A Beginning",
+            "Test Writer",
+            "Test World",
+            "ad",
+            "100 AD",
+            Some(("Arc A", 8.0)),
+            1,
+            &text,
+        )],
+        vec![],
+    );
+    let output = timeline::solve(&[first, other]).unwrap();
+    assert!(output
+        .iter()
+        .filter(|p| p.title.starts_with('A'))
+        .all(|p| p.memberships[0].1.is_none()));
+    assert_eq!(
+        output
+            .iter()
+            .find(|p| p.title == "B Later")
+            .unwrap()
+            .memberships[0]
+            .1,
+        Some(2.0)
+    );
+}
+
+#[test]
+fn a_scope_projection_cannot_disambiguate_an_ambiguous_universe_relationship() {
+    let mut lines = Vec::new();
+    let mut works = Vec::new();
+    for (title, author, scope, label) in [
+        ("Common", "First Writer", "Arc A", 1.0),
+        ("Later", "First Writer", "Arc A", 2.0),
+        ("Common", "Other Writer", "Arc B", 1.0),
+    ] {
+        let text = format!("Test World: {title} by {author} belongs to {scope} book {label}.");
+        works.push(dated(
+            title,
+            author,
+            "Test World",
+            "ad",
+            "",
+            Some((scope, label)),
+            lines.len() + 1,
+            &text,
+        ));
+        lines.push(text);
+    }
+    let target_key = timeline::key(&works[0]);
+    let relation_text =
+        "Test World: Common is set before Later in the fictional timeline.".to_string();
+    let relation = Relation {
+        universe: "Test World".into(),
+        before: "Common".into(),
+        after: "Later".into(),
+        basis: "story_time".into(),
+        citations: citation(lines.len() + 1, &relation_text),
+    };
+    lines.push(relation_text);
+    let output = timeline::solve(&[evidence(&lines, works, vec![relation])]).unwrap();
+    let target = output.iter().find(|p| p.work_key == target_key).unwrap();
+    assert_eq!(target.memberships[0].1, None);
+    assert_eq!(target.global_rank, None);
+}
+
 #[test]
 fn pre_cataclysm_years_do_not_sort_in_reverse() {
     assert_eq!(timeline::interval("krynn", "6320 PC").unwrap().first, -6320);

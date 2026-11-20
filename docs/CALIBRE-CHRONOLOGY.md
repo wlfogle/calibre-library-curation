@@ -148,7 +148,53 @@ The exact required MIT-licensed core is included in `vendor/curator-core`, with 
 Post-vendoring full validation on 2026-11-19 passed all 53 Rust tests with opt-in gates explicitly enabled, and all 74 Python tests under isolated Calibre Python, including the six native API cases. Existing libraries were not updated. These test results do not replace complete bibliography/per-series membership verification or independent source corroboration.
 
 ### Automatic wrapper: reviewed safety and audit behavior
+The subsequent explicitly authorized real-book probe did not pass live acceptance.
+Full search remained blocked; source acquisition returned unrelated material or
+HTTP failures. Four extraction attempts were retained from an unrelated page;
+the last stopped at the existing 2,048-token output cap. The cap, model and
+evidence validators were not relaxed. New and cached pages now require a matching
+title/author or a universe already established by cited facts before inference.
+Stored series names may disambiguate discovery queries but cannot authorize a
+mapping. Offline regressions cover the common-title failure and unchanged
+unsupported metadata.
+
+The bounded follow-up made zero new extraction calls and still produced zero
+validated mappings. Across the authorized probe there were four source-page
+attempts and two additional discovery/catalogue probes, with four extraction calls
+against limits of six pages and eight calls. Both existing library database
+hashes remained unchanged. The exact diagnostics and failed live-acceptance report
+remain private; this failure is not evidence of a deployment-ready curator.
+The source-selection correction passed all 73 default Rust tests with 3 live
+opt-ins skipped, including the normal research/apply workflow. Formatting and
+whitespace checks passed; Clippy completed with warnings, without errors.
+
+Actual-library verification on 2026-11-20 scanned all 8,524 duplicate-library
+records. Both original and duplicate metadata databases passed full SQLite
+integrity checks; UUID uniqueness/validity, finite indices, baseline identity and
+all three custom series columns passed. The 218 write-protected records remain
+protected, not automatically verified. Original/duplicate database hashes and the
+duplicate's logical metadata digest were unchanged after the export check.
+
+The default retained research workspace contained one saved result, rejected as
+stale/invalid, and produced zero validated mapping rows. All 8,524 records lack
+an exportable verified mapping in that workspace. `full_library_verified` remains
+false. This was saved-evidence verification, not fresh online chronology research.
+Reports and the research snapshot remain private outside Git. The snapshot was
+placed on the roomier home filesystem; the library filesystem had only 17 GiB
+free, below the unchanged 21 GiB apply reserve. No metadata apply was requested.
+The final default Rust run passed 70 tests with 3 live opt-ins skipped; isolated
+Calibre Python passed all 74 tests; system Python passed with 6 native-only skips.
+
 `scripts/calibre_auto_curate.py` uses the `nexus-facts-batch-v2` production export. The executable now calls the shared facts/chronology path; this does not mean the whole library is verified. The actual binary-to-wrapper-to-native-Calibre fixture test has passed with independently checked main plus all three sub-series fields, source-tampering refusal and unchanged protected/source records.
+The minimum cached-evidence acceptance removes generated per-book research
+results before invoking the normal wrapper research-and-apply command, not
+export-only apply. Two results must be rebuilt from the retained source-fact
+corpus. The final CSV must contain two validated rows with a clean audit, and each
+selected name/index pair must match reopened native Calibre metadata. It also
+checks all four independent levels, protected/source preservation and an
+idempotent second apply. This test uses synthetic cited source fixtures in a new
+temporary library; it does not fetch sources, call a model or establish the
+chronology of existing library books.
 
 The workspace lock is acquired before clone receipt and storage preflights. Library directories and symlink lock files are refused before changing them. The lock serializes cooperating wrappers, not external receipt writers or arbitrary database tools; the existing importer/writer checks still apply.
 
@@ -182,16 +228,86 @@ The pre-vendoring full validation passed all **53 Rust tests with no skips** and
 The reported `Less than 21 GiB free` refusal is a storage preflight, not a research result. A read-only research run may use a separate filesystem with sufficient workspace reserve through `--workspace`; every apply still checks the unchanged 21 GiB reserve on the library filesystem as well. No files are deleted and no reserve is lowered automatically.
 
 ### Nested series data structure
-The production calculator now requires an explicit, cited complete bibliography
-or chronology heading for the universe and independently for every displayed
-sub-series. A universe-wide bibliography alone does not verify sub-series ranks.
+The production calculator requires an explicit, cited complete bibliography or
+chronology scope independently for each level it exports. A universe-wide
+bibliography alone does not verify sub-series ranks; an incomplete universe does
+not prevent an independently complete sub-series from being ordered.
 Recognized bibliography entries must each have a validated work identity and
 membership in the claimed scope within that document. An omitted entry or an
-extracted title with missing scoped membership leaves the mapping
-`research_pending`, with all four export flags false. Completeness is keyed by
+extracted title with missing scoped membership withholds that scope's field.
+Other independently verified fields may be exported with `partial` status;
+otherwise the result remains `research_pending`. Completeness is keyed by
 both universe and scope; a same-named series in another universe cannot satisfy it.
+
+When the global chronology is unresolved, the solver reuses its existing
+validators and ordering rules on each membership's work set. Original evidence
+and memberships are preserved; only the internal ordering projection removes
+membership fields. Local ties, missing temporal evidence and conflicting member
+claims still block that scope's rank. Globally ambiguous title-only relationships
+cannot become unambiguous merely by filtering competing works out of a scope.
+The conservative projection uses dates and relationships with identified
+endpoints inside the scope; it does not infer new edges through outside works.
+
+All four export flags are independent. An incomplete or unordered universe
+index is null in the reported nested hierarchy and omitted from the exported
+fields, leaving stored main-series metadata unchanged. A local field is withheld
+if an ancestor is neither supported in the same mapping nor already stored under
+the cited name. A matching stored name is display context, not approval of its
+old index. Unknown local fields are also preserved, not cleared. Saved-result
+revalidation checks the nested hierarchy and missing scopes as well as field
+values, masks and source evidence. Cached partial mappings can be used with
+model assistance disabled while unresolved levels remain retryable.
+
+The offline production workflow exercises a local-only update of all three
+sub-series levels while retaining an unsupported main-series index of 77. It
+checks that the main pair is absent from the export and its nested index is null,
+that protected and unsupported records are unchanged, and that the mapping remains
+in retry as partial. Restoring universe evidence then permits the existing full
+research/apply and idempotence checks. These are synthetic temporary-library
+checks, not a successful real-source acceptance.
+
+Independent-index verification passed 82 default Rust tests (3 live opt-ins
+skipped), all 74 isolated Calibre-Python tests, and the system-Python suite with
+6 native-only skips. Rust formatting, Python syntax and whitespace checks passed;
+Clippy completed with warnings, without errors. No live requests, inference or
+existing-library writes were performed for this change.
+
 `missing_scopes` is retained in the research result, and subsequent bounded
 research targets the first missing scope rather than repeating a generic book query.
+Before discovery, normal continuation processes relevant unfinished cached source
+chunks even when the target's identity is already known. Missing-scope headings
+take priority, followed by pages mentioning the title and other sources for its
+verified universe. Stale, unrelated and fully extracted documents are excluded
+from this cached pass. Each processed page and extraction consumes the existing
+budgets; completed chunks are not re-extracted. A cached extraction failure stops
+the pass, retaining successful chunks and private diagnostics rather than starting
+more searches or model calls in the same run. A still-pending mapping is reported
+as blocked.
+`--refresh` deliberately bypasses this cache-first pass.
+
+Sub-series investigation keys now include both universe and scope. Their discovery
+queries include the verified universe for disambiguation. Existing universe-level
+keys remain usable; old ambiguous sub-series query histories are retained in the
+workspace but are not promoted into the new universe-scoped retry state.
+Each investigation also retains `pending_urls` in the existing private corpus.
+Normal runs drain this frontier before issuing more discovery queries unless a
+previous fetch/search failure set the persisted `discovery_due` flag. This lets
+alternative discovery proceed without discarding failed source leads. The queue
+is checkpointed before source processing and after each processed page; linked
+bibliographies, unfinished extractions and failed fetches survive page/call
+limits. Failed or unfinished sources move behind unvisited leads. An unresolved
+identity with a nonempty frontier remains retryable rather than being declared an
+exhausted factual-review case.
+
+Fresh, fully extracted cached pages forward their retained links without
+consuming a source-page slot. Link cycles and fragments are deduplicated, and
+queued URLs are revalidated with the existing HTTPS/safe-link/prose-work filters.
+Actual fetches still enforce the existing DNS, address and response limits.
+Stale snapshots and explicit refreshes remain eligible for acquisition. A legacy
+`completed_urls` entry alone cannot hide a missing or unfinished snapshot.
+Old investigations deserialize with an empty frontier and recover available
+links from related cached pages; already-lost links absent from those pages
+cannot be reconstructed.
 
 This is a conservative gate, not a general bibliography parser or independent
 corroboration. Entry accounting currently recognizes table rows, ordered-list
@@ -212,11 +328,42 @@ Calibre configuration, including all six native API cases. The separate
 system-Python command and format/lint/syntax-check batch were cancelled; neither
 is reported as a fresh pass. The initial diff whitespace check passed. No existing
 library was modified; the native workflow and API tests used temporary fixtures.
+Latest continuation verification passed 70 default Rust tests (3 HTTP/model
+opt-ins skipped) and all 74 isolated Calibre-Python tests. Thirteen additional
+offline regressions exercise cached extraction and durable source continuation:
+separately budgeted extraction passes, completed chunks, zero budgets, source
+priority/freshness, failure checkpoints, universe-isolated investigation keys,
+save/reopen frontier persistence, cached link cycles, stale/refresh behavior,
+unsafe leads, legacy cache loading, missing snapshots, retry ordering and
+persisted discovery-after-failure decisions.
+Formatting, Python syntax (10 files) and whitespace checks passed. Clippy
+completed with unused-code/style warnings, without errors. No existing library
+was modified and no live HTTP/model calls were made during this validation.
 
 `timeline::SeriesHierarchy` stores a series name, the book's independent optional index, and recursive `subseries`. Calculated placements include this tree alongside the compatibility membership list. Parent links preserve Forgotten Realms → The Legend of Drizzt → Icewind Dale; parallel branches and deeper nesting are supported. Unknown positions stay null. Unknown parents, cycles and conflicting parents/indices are rejected. Offline tests cover that three-level example, JSON round-trip, multiple branches, deeper nesting and the solver's nested output. This data structure does not establish new bibliographic facts or complete production research integration.
 The user's verified **Greater Eternal Champion Saga is the structural and in-universe chronological reference**, not a publication-order template. Read-only inspection confirmed 94 protected books. A regression retains the actual independent assignments for Dreamthief's Daughter (saga 97 / Elric 10 / The Moonbeam Roads 1), The Skrayling Tree (98 / 11 / 2), and The White Wolf's Son (saga 99 / The Moonbeam Roads 3 / Oona Von Bek 3). The hierarchy does not copy a parent index into a child or renumber these protected books.
 
 ### Live discovery and three-book research to native updates
+Explicit opt-in regression verification on 2026-11-20 against commit `728b3c7`
+passed all three tests, serially and without retries:
+- Installed Ollama extracted the unfamiliar synthetic temporal-facts case.
+- Live configured-source research verified native updates for three Known Space
+  books in a new temporary library.
+- Live automatic discovery, without a configured-URL fallback, independently
+  verified those three books in another new temporary library.
+
+The 82 default adapter tests and these 3 opt-in tests all passed. No existing
+library was an apply target. Complete logs are retained privately at
+`/home/loufogle/.cache/calibre-live-verification-4kih47h7/`; extraction diagnostics
+at `/tmp/nexus-extractor-proof-IDfap2`; configured-source readback evidence at
+`/tmp/nexus-live-book-e2e-eRk7cX`; and discovery/readback evidence at
+`/tmp/nexus-live-discovery-XvoHTj` and `/tmp/nexus-live-book-e2e-aYzhve`.
+These are source-specific, selected-three-work-context tests. They are not
+whole-universe numbering verification, do not exercise a live local-only
+production export, and do not supersede the separate failed Sentinel production
+acceptance. Independent local-only sparse export remains covered by the offline
+production/native workflow.
+
 `tools/calibre-research/tests/live_book.rs` has two opt-in acceptance tests covering **Ringworld**, **The Ringworld Engineers** and **The Ringworld Throne**:
 - Configured-source research fetches the live Niven-hosted chronology and separate membership guide.
 - Automatic discovery starts with a book/author query, uses the existing guarded search/cache, prioritizes author-site chronology leads before truncating results, and follows relevant source links. It permits at most four source-page fetches and never falls back to the configured URLs to claim discovery success.
