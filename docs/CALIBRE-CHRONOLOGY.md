@@ -148,7 +148,33 @@ The exact required MIT-licensed core is included in `vendor/curator-core`, with 
 Post-vendoring full validation on 2026-11-19 passed all 53 Rust tests with opt-in gates explicitly enabled, and all 74 Python tests under isolated Calibre Python, including the six native API cases. Existing libraries were not updated. These test results do not replace complete bibliography/per-series membership verification or independent source corroboration.
 
 ### Automatic wrapper: reviewed safety and audit behavior
+Actual-library verification on 2026-11-20 scanned all 8,524 duplicate-library
+records. Both original and duplicate metadata databases passed full SQLite
+integrity checks; UUID uniqueness/validity, finite indices, baseline identity and
+all three custom series columns passed. The 218 write-protected records remain
+protected, not automatically verified. Original/duplicate database hashes and the
+duplicate's logical metadata digest were unchanged after the export check.
+
+The default retained research workspace contained one saved result, rejected as
+stale/invalid, and produced zero validated mapping rows. All 8,524 records lack
+an exportable verified mapping in that workspace. `full_library_verified` remains
+false. This was saved-evidence verification, not fresh online chronology research.
+Reports and the research snapshot remain private outside Git. The snapshot was
+placed on the roomier home filesystem; the library filesystem had only 17 GiB
+free, below the unchanged 21 GiB apply reserve. No metadata apply was requested.
+The final default Rust run passed 70 tests with 3 live opt-ins skipped; isolated
+Calibre Python passed all 74 tests; system Python passed with 6 native-only skips.
+
 `scripts/calibre_auto_curate.py` uses the `nexus-facts-batch-v2` production export. The executable now calls the shared facts/chronology path; this does not mean the whole library is verified. The actual binary-to-wrapper-to-native-Calibre fixture test has passed with independently checked main plus all three sub-series fields, source-tampering refusal and unchanged protected/source records.
+The minimum cached-evidence acceptance removes generated per-book research
+results before invoking the normal wrapper research-and-apply command, not
+export-only apply. Two results must be rebuilt from the retained source-fact
+corpus. The final CSV must contain two validated rows with a clean audit, and each
+selected name/index pair must match reopened native Calibre metadata. It also
+checks all four independent levels, protected/source preservation and an
+idempotent second apply. This test uses synthetic cited source fixtures in a new
+temporary library; it does not fetch sources, call a model or establish the
+chronology of existing library books.
 
 The workspace lock is acquired before clone receipt and storage preflights. Library directories and symlink lock files are refused before changing them. The lock serializes cooperating wrappers, not external receipt writers or arbitrary database tools; the existing importer/writer checks still apply.
 
@@ -192,6 +218,40 @@ extracted title with missing scoped membership leaves the mapping
 both universe and scope; a same-named series in another universe cannot satisfy it.
 `missing_scopes` is retained in the research result, and subsequent bounded
 research targets the first missing scope rather than repeating a generic book query.
+Before discovery, normal continuation processes relevant unfinished cached source
+chunks even when the target's identity is already known. Missing-scope headings
+take priority, followed by pages mentioning the title and other sources for its
+verified universe. Stale, unrelated and fully extracted documents are excluded
+from this cached pass. Each processed page and extraction consumes the existing
+budgets; completed chunks are not re-extracted. A cached extraction failure stops
+the pass, retaining successful chunks and private diagnostics rather than starting
+more searches or model calls in the same run. A still-pending mapping is reported
+as blocked.
+`--refresh` deliberately bypasses this cache-first pass.
+
+Sub-series investigation keys now include both universe and scope. Their discovery
+queries include the verified universe for disambiguation. Existing universe-level
+keys remain usable; old ambiguous sub-series query histories are retained in the
+workspace but are not promoted into the new universe-scoped retry state.
+Each investigation also retains `pending_urls` in the existing private corpus.
+Normal runs drain this frontier before issuing more discovery queries unless a
+previous fetch/search failure set the persisted `discovery_due` flag. This lets
+alternative discovery proceed without discarding failed source leads. The queue
+is checkpointed before source processing and after each processed page; linked
+bibliographies, unfinished extractions and failed fetches survive page/call
+limits. Failed or unfinished sources move behind unvisited leads. An unresolved
+identity with a nonempty frontier remains retryable rather than being declared an
+exhausted factual-review case.
+
+Fresh, fully extracted cached pages forward their retained links without
+consuming a source-page slot. Link cycles and fragments are deduplicated, and
+queued URLs are revalidated with the existing HTTPS/safe-link/prose-work filters.
+Actual fetches still enforce the existing DNS, address and response limits.
+Stale snapshots and explicit refreshes remain eligible for acquisition. A legacy
+`completed_urls` entry alone cannot hide a missing or unfinished snapshot.
+Old investigations deserialize with an empty frontier and recover available
+links from related cached pages; already-lost links absent from those pages
+cannot be reconstructed.
 
 This is a conservative gate, not a general bibliography parser or independent
 corroboration. Entry accounting currently recognizes table rows, ordered-list
@@ -212,6 +272,17 @@ Calibre configuration, including all six native API cases. The separate
 system-Python command and format/lint/syntax-check batch were cancelled; neither
 is reported as a fresh pass. The initial diff whitespace check passed. No existing
 library was modified; the native workflow and API tests used temporary fixtures.
+Latest continuation verification passed 70 default Rust tests (3 HTTP/model
+opt-ins skipped) and all 74 isolated Calibre-Python tests. Thirteen additional
+offline regressions exercise cached extraction and durable source continuation:
+separately budgeted extraction passes, completed chunks, zero budgets, source
+priority/freshness, failure checkpoints, universe-isolated investigation keys,
+save/reopen frontier persistence, cached link cycles, stale/refresh behavior,
+unsafe leads, legacy cache loading, missing snapshots, retry ordering and
+persisted discovery-after-failure decisions.
+Formatting, Python syntax (10 files) and whitespace checks passed. Clippy
+completed with unused-code/style warnings, without errors. No existing library
+was modified and no live HTTP/model calls were made during this validation.
 
 `timeline::SeriesHierarchy` stores a series name, the book's independent optional index, and recursive `subseries`. Calculated placements include this tree alongside the compatibility membership list. Parent links preserve Forgotten Realms → The Legend of Drizzt → Icewind Dale; parallel branches and deeper nesting are supported. Unknown positions stay null. Unknown parents, cycles and conflicting parents/indices are rejected. Offline tests cover that three-level example, JSON round-trip, multiple branches, deeper nesting and the solver's nested output. This data structure does not establish new bibliographic facts or complete production research integration.
 The user's verified **Greater Eternal Champion Saga is the structural and in-universe chronological reference**, not a publication-order template. Read-only inspection confirmed 94 protected books. A regression retains the actual independent assignments for Dreamthief's Daughter (saga 97 / Elric 10 / The Moonbeam Roads 1), The Skrayling Tree (98 / 11 / 2), and The White Wolf's Son (saga 99 / The Moonbeam Roads 3 / Oona Von Bek 3). The hierarchy does not copy a parent index into a child or renumber these protected books.

@@ -166,6 +166,354 @@ fn fixture() -> (Book, curation::Corpus) {
     (book, corpus)
 }
 
+fn unfinished_scope_fixture() -> (Book, curation::Corpus, Vec<facts::Chunk>) {
+    let (book, mut corpus) = fixture();
+    let url = "https://scope.example/small-arc";
+    let mut works = corpus.pages[url]
+        .chunks
+        .iter()
+        .flat_map(|c| c.evidence.facts.works.iter().cloned())
+        .collect::<Vec<_>>();
+    for index in 2..5 {
+        let mut work = works[1].clone();
+        work.title = format!("Unowned Work {index}");
+        work.settings[0].literal = format!("{} AD", (index + 1) * 100);
+        work.memberships[0].published_number = Some((index + 1) as f64);
+        works.push(work);
+    }
+    let mut document = bibliography::series_document("Small Arc", &works, url);
+    let retained = document.chunks.clone();
+    assert_eq!(retained.len(), 3);
+    document.chunks.truncate(1);
+    document.processed = 1;
+    corpus.pages.insert(url.into(), document);
+    (book, corpus, retained)
+}
+
+#[test]
+fn known_identity_resumes_cached_membership_chunks_within_each_call_budget() {
+    let (book, mut corpus, retained) = unfinished_scope_fixture();
+    assert_eq!(
+        curation::calculate(&book, &corpus).unwrap().missing_scopes,
+        vec!["Small Arc"]
+    );
+    for expected_remaining in [1, 0] {
+        let progress = curation::resume_cached_sources(&book, &mut corpus, 1, 1, |page, input| {
+            let hash = curator_core::sources::hash(&serde_json::to_vec(input).unwrap());
+            let chunk = retained.iter().find(|c| c.segments_hash == hash).unwrap();
+            assert_eq!(chunk.evidence.source.sha256, page.source.sha256);
+            Ok(chunk.clone())
+        })
+        .unwrap();
+        assert_eq!(progress.pages, 1);
+        assert_eq!(progress.calls, 1);
+        assert!(progress.errors.is_empty());
+        assert_eq!(
+            curation::pending_chunk_indices(
+                &corpus.pages["https://scope.example/small-arc"],
+                &book
+            )
+            .unwrap()
+            .len(),
+            expected_remaining
+        );
+        let result = curation::calculate(&book, &corpus).unwrap();
+        if expected_remaining > 0 {
+            assert_eq!(result.status, "research_pending");
+            assert_eq!(result.field_mask, [false; 4]);
+        } else {
+            assert_eq!(result.status, "ready");
+            assert_eq!(result.hierarchy[1].index, Some(1.0));
+        }
+    }
+    let progress = curation::resume_cached_sources(&book, &mut corpus, 1, 1, |_, _| {
+        panic!("Completed source chunks must never be extracted again")
+    })
+    .unwrap();
+    assert_eq!(progress.calls, 0);
+}
+
+#[test]
+fn cached_scope_failures_keep_the_unprocessed_chunk_retryable() {
+    let (book, mut corpus, _) = unfinished_scope_fixture();
+    let page = curator_core::chronology::parse_page(
+        b"<h1>Complete bibliography of New Universe</h1><p>Another Work by New Writer in New Universe.</p>",
+        "https://z.example/other-cached-page",
+    ).unwrap();
+    corpus.pages.insert(
+        page.source.location.clone(),
+        curation::Document {
+            page,
+            processed: 0,
+            chunks: vec![],
+        },
+    );
+    let before = serde_json::to_value(&corpus).unwrap();
+    let progress = curation::resume_cached_sources(&book, &mut corpus, 2, 2, |_, _| {
+        anyhow::bail!("Retained extraction failure")
+    })
+    .unwrap();
+    assert_eq!(progress.calls, 1);
+    assert_eq!(progress.errors, vec!["Retained extraction failure"]);
+    assert_eq!(serde_json::to_value(&corpus).unwrap(), before);
+    assert_eq!(
+        curation::cached_document_urls(&book, &corpus)
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn zero_cache_budgets_never_start_an_extraction() {
+    for (pages, calls) in [(0, 2), (2, 0)] {
+        let (book, mut corpus, _) = unfinished_scope_fixture();
+        let progress = curation::resume_cached_sources(&book, &mut corpus, pages, calls, |_, _| {
+            panic!("A zero budget must prevent extraction")
+        })
+        .unwrap();
+        assert_eq!(progress.pages, 0);
+        assert_eq!(progress.calls, 0);
+    }
+}
+
+#[test]
+fn cached_scope_priority_excludes_stale_unrelated_and_completed_pages() {
+    let (book, mut corpus, _) = unfinished_scope_fixture();
+    for (url, html) in [
+        ("https://a.example/universe", "<h1>Complete bibliography of New Universe</h1><p>Another Work by New Writer in New Universe.</p>"),
+        ("https://a.example/unrelated", "<h1>Complete bibliography of Other Universe</h1><p>Other Work by Other Writer in Other Universe.</p>"),
+    ] {
+        let page = curator_core::chronology::parse_page(html.as_bytes(), url).unwrap();
+        corpus.pages.insert(url.into(), curation::Document { page, processed: 0, chunks: vec![] });
+    }
+    assert_eq!(
+        curation::cached_document_urls(&book, &corpus).unwrap(),
+        vec![
+            "https://scope.example/small-arc",
+            "https://a.example/universe"
+        ]
+    );
+    corpus
+        .pages
+        .get_mut("https://scope.example/small-arc")
+        .unwrap()
+        .page
+        .fetched_at = 0;
+    assert_eq!(
+        curation::cached_document_urls(&book, &corpus).unwrap(),
+        vec!["https://a.example/universe"]
+    );
+    let (book, complete) = fixture();
+    assert!(curation::cached_document_urls(&book, &complete)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn scoped_investigations_are_namespaced_by_the_verified_universe() {
+    let (book, _) = fixture();
+    let first = curation::investigation_key(&book, Some("New Universe"), Some("Small Arc"));
+    let other = curation::investigation_key(&book, Some("Other Universe"), Some("Small Arc"));
+    assert_eq!(first, "scope:newuniverse:smallarc");
+    assert_ne!(first, other);
+    assert_ne!(
+        first,
+        curation::investigation_key(&book, Some("New Universe"), None)
+    );
+    assert_eq!(
+        curation::investigation_key(&book, Some("New Universe"), Some("New Universe")),
+        "universe:newuniverse"
+    );
+    assert_eq!(
+        curation::investigation_key(&book, None, None),
+        "work:newwork:newwriter"
+    );
+}
+
+#[test]
+fn linked_bibliography_frontier_survives_a_saved_corpus_checkpoint() {
+    use curator_core::store::Store;
+    let (book, mut corpus) = fixture();
+    let guide = "https://scope.example/small-arc";
+    let root_url = "https://example.org/chronology";
+    let mut scope = corpus
+        .pages
+        .remove("https://scope.example/small-arc")
+        .unwrap();
+    corpus.pages.get_mut(root_url).unwrap().page.links = vec![guide.into()];
+    let key = curation::investigation_key(&book, Some("New Universe"), Some("Small Arc"));
+    let mut investigation = curation::Investigation::default();
+    investigation.pending_urls =
+        curation::pending_source_urls(&book, &corpus, &investigation, &[], false).unwrap();
+    assert_eq!(investigation.pending_urls, vec![guide]);
+    corpus.investigations.insert(key.clone(), investigation);
+    let temp = tempfile::tempdir().unwrap();
+    {
+        let store = Store::open(temp.path()).unwrap();
+        store.cache_value(curation::CORPUS_KEY, &corpus).unwrap();
+    }
+    let store = Store::open(temp.path()).unwrap();
+    let mut resumed: curation::Corpus = store.cached_value(curation::CORPUS_KEY).unwrap().unwrap();
+    // Even if the parent link is no longer in memory, the queued target survives.
+    resumed.pages.get_mut(root_url).unwrap().page.links.clear();
+    let queued =
+        curation::pending_source_urls(&book, &resumed, &resumed.investigations[&key], &[], false)
+            .unwrap();
+    assert_eq!(queued, vec![guide]);
+    assert_eq!(
+        curation::calculate(&book, &resumed).unwrap().status,
+        "research_pending"
+    );
+    // Replay the already-screened synthetic bibliography at its original URL.
+    let scope_url = scope.page.source.location.clone();
+    scope.page.links.clear();
+    resumed.pages.insert(scope_url, scope);
+    assert!(curation::pending_source_urls(
+        &book,
+        &resumed,
+        &resumed.investigations[&key],
+        &[],
+        false,
+    )
+    .unwrap()
+    .is_empty());
+    assert_eq!(
+        curation::calculate(&book, &resumed).unwrap().status,
+        "ready"
+    );
+}
+
+#[test]
+fn completed_cached_sources_forward_links_once_without_cycle_or_page_slots() {
+    let (book, mut corpus) = fixture();
+    let root = "https://example.org/chronology";
+    let arc = "https://scope.example/small-arc";
+    let next = "https://guide.example/series";
+    corpus.pages.get_mut(root).unwrap().page.links = vec![arc.into(), next.into()];
+    corpus.pages.get_mut(arc).unwrap().page.links = vec![root.into(), format!("{next}#books")];
+    let pending =
+        curation::source_frontier(&book, &corpus, &[root.into(), arc.into()], false).unwrap();
+    assert_eq!(pending, vec![next]);
+}
+
+#[test]
+fn stale_refreshed_or_unfinished_sources_are_not_skipped_as_completed() {
+    let (book, mut corpus) = fixture();
+    let root = "https://example.org/chronology";
+    let urls = vec![root.into()];
+    assert!(curation::source_frontier(&book, &corpus, &urls, false)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        curation::source_frontier(&book, &corpus, &urls, true).unwrap(),
+        urls
+    );
+    corpus.pages.get_mut(root).unwrap().page.fetched_at = 0;
+    assert_eq!(
+        curation::source_frontier(&book, &corpus, &urls, false).unwrap(),
+        urls
+    );
+    corpus.pages.get_mut(root).unwrap().page.fetched_at = metadata::now();
+    corpus.pages.get_mut(root).unwrap().chunks.clear();
+    assert_eq!(
+        curation::source_frontier(&book, &corpus, &urls, false).unwrap(),
+        urls
+    );
+}
+
+#[test]
+fn retained_frontier_revalidates_links_and_deduplicates_fragments() {
+    let (book, corpus) = fixture();
+    let urls = [
+        "http://guide.example/series",
+        "https://127.0.0.1/series",
+        "https://localhost/series",
+        "https://user@guide.example/series",
+        "file:///tmp/bibliography",
+        "https://audible.com/series",
+        "https://guide.example/audiobook/series",
+        "https://guide.example/series#one",
+        "https://guide.example/series#two",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect::<Vec<_>>();
+    assert_eq!(
+        curation::source_frontier(&book, &corpus, &urls, false).unwrap(),
+        vec!["https://guide.example/series"]
+    );
+}
+
+#[test]
+fn legacy_investigations_default_to_an_empty_frontier_and_recover_cached_links() {
+    let (book, mut corpus) = fixture();
+    let root = "https://example.org/chronology";
+    let guide = "https://guide.example/bibliography";
+    let investigation: curation::Investigation = serde_json::from_value(serde_json::json!({
+        "successful_queries": ["old successful query"],
+        "completed_urls": [root]
+    }))
+    .unwrap();
+    assert!(investigation.pending_urls.is_empty());
+    corpus.pages.get_mut(root).unwrap().page.links = vec![guide.into()];
+    assert_eq!(
+        curation::pending_source_urls(&book, &corpus, &investigation, &[], false).unwrap(),
+        vec![guide]
+    );
+}
+
+#[test]
+fn a_completed_url_marker_never_hides_a_missing_snapshot() {
+    let (book, corpus) = fixture();
+    let missing = "https://guide.example/missing";
+    let mut investigation = curation::Investigation::default();
+    investigation.completed_urls.insert(missing.into());
+    investigation.pending_urls.push(missing.into());
+    assert_eq!(
+        curation::pending_source_urls(&book, &corpus, &investigation, &[], false).unwrap(),
+        vec![missing]
+    );
+}
+
+#[test]
+fn deferred_sources_preserve_unvisited_priority_across_serialized_retries() {
+    let (book, corpus) = fixture();
+    let mut investigation = curation::Investigation {
+        pending_urls: vec![
+            "https://guide.example/unreachable".into(),
+            "https://guide.example/unvisited".into(),
+        ],
+        ..Default::default()
+    };
+    investigation.defer_source("https://guide.example/unreachable");
+    let restored: curation::Investigation =
+        serde_json::from_value(serde_json::to_value(&investigation).unwrap()).unwrap();
+    assert_eq!(
+        curation::pending_source_urls(&book, &corpus, &restored, &[], false).unwrap(),
+        vec![
+            "https://guide.example/unvisited",
+            "https://guide.example/unreachable"
+        ]
+    );
+}
+
+#[test]
+fn failed_fetch_discovery_flag_survives_without_discarding_pending_sources() {
+    let mut investigation = curation::Investigation {
+        pending_urls: vec!["https://guide.example/unreachable".into()],
+        ..Default::default()
+    };
+    assert!(!investigation.discovery_needed(&investigation.pending_urls, false));
+    assert!(investigation.discovery_needed(&[], false));
+    assert!(investigation.discovery_needed(&investigation.pending_urls, true));
+    investigation.discovery_due = true;
+    let restored: curation::Investigation =
+        serde_json::from_value(serde_json::to_value(&investigation).unwrap()).unwrap();
+    assert!(restored.discovery_needed(&restored.pending_urls, false));
+    assert_eq!(restored.pending_urls, investigation.pending_urls);
+}
+
 #[test]
 fn actual_local_output_produces_cited_chronology_from_shared_profile() {
     let (book, corpus) = fixture();

@@ -278,14 +278,59 @@ b=sqlite3.connect(source/'metadata.db'); a.backup(b); b.close(); a.close()
         .cache_value(curation::CORPUS_KEY, &original_corpus)
         .unwrap();
     drop(app);
-    // Full handoff to native Calibre, with field masks preserving unsupported levels.
-    run_wrapper(&["--export-only", "--apply"]);
+    // Require the normal research command to rebuild book results from source facts.
+    for mapping in exported["mappings"].as_array().unwrap() {
+        let id = mapping["id"].as_i64().unwrap();
+        fs::remove_file(engine_workspace.join(format!("book-results/book-{id}.json"))).unwrap();
+    }
+    run_wrapper(&["--limit", "2", "--apply"]);
     let applied: Value = serde_json::from_slice(&run_wrapper(&["--last-summary"]).stdout).unwrap();
     assert_eq!(applied["apply_status"], "applied");
     assert_eq!(applied["applied"], true);
+    assert_eq!(applied["validated_mapping_rows"], 2);
+    assert_eq!(applied["proposed_changes"], 2);
+    assert_eq!(applied["validation_errors"], json!([]));
+    let rows: Value = serde_json::from_slice(
+        &command_ok(
+            Command::new("python3")
+                .args(["-c", "import csv,json,sys; print(json.dumps(list(csv.DictReader(open(sys.argv[1],encoding='utf-8-sig',newline='')))))"])
+                .arg(applied["mapping_csv_path"].as_str().unwrap()),
+        ).stdout,
+    ).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
     let mut app = App::open(&engine_workspace, Default::default()).unwrap();
     app.refresh().unwrap();
     let scan = app.scan.as_ref().unwrap();
+    for row in rows.as_array().unwrap() {
+        let book = scan.books.iter().find(|b| row["uuid"] == b.uuid).unwrap();
+        assert_eq!(row["order_verified"], "yes");
+        assert_eq!(row["order_basis"], "in-universe");
+        assert!(row["order_source"].as_str().unwrap().contains("sha256="));
+        let fields = row["update_fields"]
+            .as_str()
+            .unwrap()
+            .split(';')
+            .collect::<Vec<_>>();
+        for (slot, name) in ["series", "#series2", "#series3", "#series4"]
+            .iter()
+            .enumerate()
+        {
+            if !fields.contains(name) {
+                continue;
+            }
+            let index = if slot == 0 {
+                "series_index".to_string()
+            } else {
+                format!("{name}_index")
+            };
+            assert!(fields.contains(&index.as_str()));
+            assert_eq!(row[*name].as_str(), book.hierarchy[slot].name.as_deref());
+            assert_eq!(
+                row[&index].as_str().unwrap().parse::<f64>().unwrap(),
+                book.hierarchy[slot].index.unwrap()
+            );
+        }
+    }
     assert_eq!(
         scan.books[0].hierarchy[0].name.as_deref(),
         Some("Fixture Universe")
